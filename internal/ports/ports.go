@@ -22,10 +22,19 @@ type TicketDrafter interface {
 	Draft(ctx context.Context, messages []Message) (domain.Draft, error)
 }
 
+// Attachment is an image downloaded from the source message, to be
+// re-uploaded to the created Issue. Video is never downloaded — see
+// CreateTicketRequest.VideoURL in internal/usecase.
+type Attachment struct {
+	Filename string
+	Data     []byte
+}
+
 // IssueTracker creates Issues and reports on their current state.
-// Implemented by the jira adapter.
+// Implemented by the jira adapter. attachment is nil when the source
+// message carries no image.
 type IssueTracker interface {
-	CreateIssue(ctx context.Context, draft domain.Draft, assignee domain.Assignee) (domain.Ticket, error)
+	CreateIssue(ctx context.Context, draft domain.Draft, assignee domain.Assignee, attachment *Attachment) (domain.Ticket, error)
 	GetIssueStatus(ctx context.Context, key string) (domain.Ticket, error)
 }
 
