@@ -12,7 +12,7 @@ import (
 	"github.com/actuponit/telegram-jira-integration/internal/ports"
 )
 
-const model = "gemini-2.5-flash"
+const model = "gemini-3.6-flash"
 
 const systemInstruction = `You draft Jira tickets from a Telegram conversation.
 Stay strictly factual: only use details present in the conversation, never invent

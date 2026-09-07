@@ -166,8 +166,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
 	var update tgbotapi.Update
-	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+	if err := json.Unmarshal(body, &update); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
@@ -177,6 +182,18 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	message := update.Message
+
+	// Diagnostic: whether the bot receives plain (non-command) group messages
+	// tells us if privacy mode is actually lifted for this membership, which
+	// is what decides if reply_to_message can be populated at all.
+	h.logger.Info("update received",
+		"telegram_message_id", message.MessageID,
+		"chat_id", message.Chat.ID,
+		"command", commandName(message.Text),
+		"has_reply_to", message.ReplyToMessage != nil,
+		"has_text", message.Text != "",
+		"from_bot", message.From != nil && message.From.IsBot,
+	)
 
 	command := commandName(message.Text)
 	if command != commandToTicket && command != commandStatus {

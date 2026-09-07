@@ -7,6 +7,13 @@ import (
 	"github.com/actuponit/telegram-jira-integration/internal/domain"
 )
 
+func TestModel_IsSupportedFlashModel(t *testing.T) {
+	const want = "gemini-3.6-flash"
+	if model != want {
+		t.Fatalf("model = %q, want %q", model, want)
+	}
+}
+
 func TestParseDraft_RoundTripsRecordedFixture(t *testing.T) {
 	data, err := os.ReadFile("testdata/draft_response.json")
 	if err != nil {

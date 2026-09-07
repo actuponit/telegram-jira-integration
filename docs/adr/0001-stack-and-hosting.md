@@ -54,8 +54,9 @@ JS-only, under-documented platform was rejected.
 - **Assignee fallback:** an unresolved or omitted `@assignee` always creates
   an unassigned Issue plus a soft-fail chat message — never a default
   fallback owner.
-- **Gemini model:** `gemini-2.5-flash` — this is a background ops tool, not
-  worth preview-tier instability for marginal quality gains.
+- **Gemini model:** `gemini-3.6-flash` — this is a background ops tool, not
+  worth preview-tier instability for marginal quality gains. This supersedes
+  `gemini-2.5-flash`, which Google retired for new users.
 
 ## Consequences
 

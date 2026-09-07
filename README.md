@@ -45,7 +45,7 @@ Secret Manager name: `telegram-bot-token`
 #### `GEMINI_API_KEY`
 
 Used to draft the Issue title, description, type, priority, and labels.
-Model is `gemini-2.5-flash` (hardcoded, per ADR-0001).
+Model is `gemini-3.6-flash` (hardcoded, per ADR-0001).
 
 1. Go to [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 2. *Create API key* → pick a Google Cloud project (the same one you deploy
@@ -375,9 +375,57 @@ reports the assignee and workflow status.
 
 ---
 
+## 4b. Continuous deployment (optional)
+
+Once the manual deploy works, a Cloud Build trigger can take over: every push
+to `main` runs the tests, builds the image, and deploys the new revision.
+
+**Step 1 — create the trigger in the console.** This is a browser step, and
+it cannot be scripted: it installs the Cloud Build GitHub App on the repo,
+and on this project the API rejects triggers created from the CLI outright
+(`INVALID_ARGUMENT`, with no further detail) even once the app is installed.
+
+1. Open <https://console.cloud.google.com/cloud-build/triggers?project=telegram-bot-507916>
+2. **Create trigger**, source **GitHub (Cloud Build GitHub App)** — not
+   "GitHub (mirrored)".
+3. Authenticate as a GitHub account with **admin** rights on
+   `actuponit/telegram-jira-integration`, install the app, tick that repo.
+4. Name it `Github`, event "Push to a branch", branch `^main$`. The rest of
+   the settings do not matter — step 2 overwrites them.
+
+**Step 2 — configure it.**
+
+```bash
+./deploy/50-cloudbuild-trigger.sh
+```
+
+It grants the Cloud Build service account the roles it needs
+(`run.admin`, `artifactregistry.writer`, `logging.logWriter`, plus
+`iam.serviceAccountUser` on the runtime service account), then imports the
+full trigger definition: build config `cloudbuild.yaml`, substitutions read
+from `deploy/config.env`, and the Cloud Build service account as the trigger
+identity — deliberately not the bot's runtime identity, which must never hold
+deploy permissions.
+
+Re-run it after editing `deploy/config.env`; the import updates in place.
+Override the trigger name with `TRIGGER_NAME=... ./deploy/50-cloudbuild-trigger.sh`.
+
+**Step 3 — verify without pushing.**
+
+```bash
+gcloud builds triggers run Github --branch=main --region=global \
+  --project telegram-bot-507916
+```
+
+Secrets are never passed through the build: Cloud Run reads them from Secret
+Manager at runtime via `--set-secrets`, exactly as `deploy/20-deploy.sh` does.
+
 ## 5. Day-two operations
 
 ### Redeploy after a code or mapping change
+
+With the Cloud Build trigger in place, pushing to `main` is the redeploy. To
+deploy from your machine instead — or before CD is set up:
 
 ```bash
 ./deploy/20-deploy.sh
