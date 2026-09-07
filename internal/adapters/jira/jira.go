@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/actuponit/telegram-jira-integration/internal/domain"
 	"github.com/actuponit/telegram-jira-integration/internal/ports"
@@ -18,6 +19,8 @@ import (
 
 // sprintName is the fixed Sprint every created Issue is placed on.
 const sprintName = "MA Sprint Board 4"
+
+const requestTimeout = 30 * time.Second
 
 var _ ports.IssueTracker = (*Tracker)(nil)
 
@@ -37,7 +40,7 @@ type Tracker struct {
 // New creates a Tracker against the given Jira site.
 func New(baseURL, email, apiToken, projectKey string) *Tracker {
 	return &Tracker{
-		httpClient: http.DefaultClient,
+		httpClient: &http.Client{Timeout: requestTimeout},
 		baseURL:    strings.TrimSuffix(baseURL, "/"),
 		email:      email,
 		apiToken:   apiToken,

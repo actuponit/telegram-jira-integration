@@ -13,6 +13,13 @@ import (
 	"github.com/actuponit/telegram-jira-integration/internal/ports"
 )
 
+func TestNew_UsesBoundedHTTPClient(t *testing.T) {
+	tracker := New("https://jira.example", "bot@example.com", "token", "MA")
+	if tracker.httpClient.Timeout != requestTimeout {
+		t.Fatalf("HTTP client timeout = %s, want %s", tracker.httpClient.Timeout, requestTimeout)
+	}
+}
+
 func TestValidateCreateMeta_ResolvesSprintFieldFromFixture(t *testing.T) {
 	data, err := os.ReadFile("testdata/createmeta.json")
 	if err != nil {

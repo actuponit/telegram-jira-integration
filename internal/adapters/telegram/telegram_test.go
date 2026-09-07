@@ -1,0 +1,475 @@
+package telegram
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+
+	"github.com/actuponit/telegram-jira-integration/internal/domain"
+	"github.com/actuponit/telegram-jira-integration/internal/ports"
+	"github.com/actuponit/telegram-jira-integration/internal/usecase"
+)
+
+// --- fakes ---
+
+type fakeSender struct {
+	sent []tgbotapi.MessageConfig
+	err  error
+	done chan struct{}
+}
+
+func (f *fakeSender) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
+	if msg, ok := c.(tgbotapi.MessageConfig); ok {
+		f.sent = append(f.sent, msg)
+	}
+	if f.done != nil {
+		close(f.done)
+	}
+	return tgbotapi.Message{}, f.err
+}
+
+type fakeFiles struct {
+	urls map[string]string
+	data map[string][]byte
+	err  error
+}
+
+func (f *fakeFiles) FileURL(fileID string) (string, error) {
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.urls[fileID], nil
+}
+
+func (f *fakeFiles) Download(_ context.Context, url string) ([]byte, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.data[url], nil
+}
+
+type fakeDrafter struct {
+	draft domain.Draft
+	err   error
+}
+
+type blockingDrafter struct {
+	started chan<- context.Context
+	release <-chan struct{}
+}
+
+func (d blockingDrafter) Draft(ctx context.Context, _ []ports.Message) (domain.Draft, error) {
+	d.started <- ctx
+	<-d.release
+	return domain.Draft{Title: "Export crashes"}, nil
+}
+
+func (f fakeDrafter) Draft(ctx context.Context, messages []ports.Message) (domain.Draft, error) {
+	return f.draft, f.err
+}
+
+type fakeTracker struct {
+	ticket domain.Ticket
+	err    error
+}
+
+func (f fakeTracker) CreateIssue(ctx context.Context, draft domain.Draft, assignee domain.Assignee, attachment *ports.Attachment) (domain.Ticket, error) {
+	return f.ticket, f.err
+}
+
+func (f fakeTracker) GetIssueStatus(ctx context.Context, key string) (domain.Ticket, error) {
+	return domain.Ticket{}, nil
+}
+
+type fakeResolver struct {
+	assignee domain.Assignee
+	ok       bool
+}
+
+func (f fakeResolver) Resolve(ctx context.Context, handle string) (domain.Assignee, bool) {
+	return f.assignee, f.ok
+}
+
+// --- parseToTicketCommand ---
+
+func TestParseToTicketCommand(t *testing.T) {
+	cases := []struct {
+		name         string
+		text         string
+		wantAssignee string
+		wantOK       bool
+	}{
+		{"plain command", "/to-ticket", "", true},
+		{"command with bot suffix", "/to-ticket@MyBot", "", true},
+		{"command with assignee", "/to-ticket @alice", "@alice", true},
+		{"command with bot suffix and assignee", "/to-ticket@MyBot @alice", "@alice", true},
+		{"not a command", "hello there", "", false},
+		{"empty text", "", "", false},
+		{"different command", "/status", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assignee, ok := parseToTicketCommand(tc.text)
+			if ok != tc.wantOK || assignee != tc.wantAssignee {
+				t.Fatalf("parseToTicketCommand(%q) = (%q, %v), want (%q, %v)", tc.text, assignee, ok, tc.wantAssignee, tc.wantOK)
+			}
+		})
+	}
+}
+
+// --- gatherContext ---
+
+func TestGatherContext_SingleMessage(t *testing.T) {
+	source := &tgbotapi.Message{
+		MessageID: 1,
+		From:      &tgbotapi.User{UserName: "alice"},
+		Text:      "it's broken",
+		Date:      100,
+	}
+
+	got := gatherContext(source)
+
+	want := []ports.Message{{SenderName: "alice", Text: "it's broken", Timestamp: 100}}
+	if len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("gatherContext() = %+v, want %+v", got, want)
+	}
+}
+
+func TestGatherContext_ReplyChainOrderedOldestFirst(t *testing.T) {
+	grandparent := &tgbotapi.Message{From: &tgbotapi.User{UserName: "carol"}, Text: "first report", Date: 100}
+	parent := &tgbotapi.Message{From: &tgbotapi.User{UserName: "bob"}, Text: "still happening", Date: 200, ReplyToMessage: grandparent}
+	source := &tgbotapi.Message{From: &tgbotapi.User{UserName: "alice"}, Text: "it's broken", Date: 300, ReplyToMessage: parent}
+
+	got := gatherContext(source)
+
+	if len(got) != 3 {
+		t.Fatalf("len(gatherContext()) = %d, want 3", len(got))
+	}
+	if got[0].SenderName != "carol" || got[1].SenderName != "bob" || got[2].SenderName != "alice" {
+		t.Fatalf("gatherContext() not ordered oldest-first: %+v", got)
+	}
+}
+
+func TestGatherContext_FallsBackToFirstNameAndCaption(t *testing.T) {
+	source := &tgbotapi.Message{
+		From:    &tgbotapi.User{FirstName: "Dave"},
+		Caption: "look at this",
+	}
+
+	got := gatherContext(source)
+
+	if got[0].SenderName != "Dave" {
+		t.Fatalf("SenderName = %q, want Dave", got[0].SenderName)
+	}
+	if got[0].Text != "look at this" {
+		t.Fatalf("Text = %q, want the caption", got[0].Text)
+	}
+}
+
+// --- extractImage / extractVideoURL ---
+
+func TestExtractImage_NoPhoto(t *testing.T) {
+	attachment, err := extractImage(context.Background(), &tgbotapi.Message{}, &fakeFiles{})
+	if err != nil {
+		t.Fatalf("extractImage: %v", err)
+	}
+	if attachment != nil {
+		t.Fatalf("expected nil attachment, got %+v", attachment)
+	}
+}
+
+func TestExtractImage_DownloadsLargestPhoto(t *testing.T) {
+	source := &tgbotapi.Message{
+		Photo: []tgbotapi.PhotoSize{
+			{FileID: "small"},
+			{FileID: "large"},
+		},
+	}
+	files := &fakeFiles{
+		urls: map[string]string{"large": "https://telegram.example/file/large.jpg"},
+		data: map[string][]byte{"https://telegram.example/file/large.jpg": []byte("fake-bytes")},
+	}
+
+	attachment, err := extractImage(context.Background(), source, files)
+	if err != nil {
+		t.Fatalf("extractImage: %v", err)
+	}
+	if attachment == nil {
+		t.Fatal("expected an attachment, got nil")
+	}
+	if attachment.Filename != "large.jpg" {
+		t.Fatalf("Filename = %q, want large.jpg", attachment.Filename)
+	}
+	if string(attachment.Data) != "fake-bytes" {
+		t.Fatalf("Data = %q, want fake-bytes", attachment.Data)
+	}
+}
+
+func TestExtractImage_DownloadErrorSurfaced(t *testing.T) {
+	source := &tgbotapi.Message{Photo: []tgbotapi.PhotoSize{{FileID: "large"}}}
+	files := &fakeFiles{err: errors.New("boom")}
+
+	if _, err := extractImage(context.Background(), source, files); err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestExtractVideoURL_NoVideo(t *testing.T) {
+	url, err := extractVideoURL(context.Background(), &tgbotapi.Message{}, &fakeFiles{})
+	if err != nil {
+		t.Fatalf("extractVideoURL: %v", err)
+	}
+	if url != "" {
+		t.Fatalf("url = %q, want empty", url)
+	}
+}
+
+func TestExtractVideoURL_NeverDownloadsBytes(t *testing.T) {
+	source := &tgbotapi.Message{Video: &tgbotapi.Video{FileID: "vid"}}
+	files := &fakeFiles{urls: map[string]string{"vid": "https://telegram.example/file/vid.mp4"}}
+
+	url, err := extractVideoURL(context.Background(), source, files)
+	if err != nil {
+		t.Fatalf("extractVideoURL: %v", err)
+	}
+	if url != "https://telegram.example/file/vid.mp4" {
+		t.Fatalf("url = %q, want the video file URL", url)
+	}
+	if files.data != nil {
+		t.Fatal("video bytes should never be downloaded")
+	}
+}
+
+// --- ParseTicketKey ---
+
+func TestParseTicketKey(t *testing.T) {
+	cases := []struct {
+		text    string
+		wantKey string
+		wantOK  bool
+	}{
+		{"Created PROJ-482: Export crashes — https://jira.example/browse/PROJ-482", "PROJ-482", true},
+		{"Created MA-1: Bug — url", "MA-1", true},
+		{"not a confirmation message", "", false},
+		{"", "", false},
+	}
+	for _, tc := range cases {
+		key, ok := ParseTicketKey(tc.text)
+		if key != tc.wantKey || ok != tc.wantOK {
+			t.Errorf("ParseTicketKey(%q) = (%q, %v), want (%q, %v)", tc.text, key, ok, tc.wantKey, tc.wantOK)
+		}
+	}
+}
+
+// --- classifyCreateTicketError ---
+
+func TestClassifyCreateTicketError(t *testing.T) {
+	geminiErr := fmt.Errorf("%w: %w", usecase.ErrDraftFailed, errors.New("timeout"))
+	if stage, _ := classifyCreateTicketError(geminiErr); stage != "gemini" {
+		t.Fatalf("stage = %q, want gemini", stage)
+	}
+
+	jiraErr := fmt.Errorf("%w: %w", usecase.ErrCreateIssueFailed, errors.New("issuetype is required"))
+	if stage, msg := classifyCreateTicketError(jiraErr); stage != "jira" || !bytes.Contains([]byte(msg), []byte("issuetype is required")) {
+		t.Fatalf("stage/msg = %q/%q, want jira with Jira's error message surfaced", stage, msg)
+	}
+}
+
+// --- ServeHTTP ---
+
+func newUpdateBody(t *testing.T, update tgbotapi.Update) *bytes.Reader {
+	t.Helper()
+	data, err := json.Marshal(update)
+	if err != nil {
+		t.Fatalf("marshal update: %v", err)
+	}
+	return bytes.NewReader(data)
+}
+
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(bytes.NewBuffer(nil), nil))
+}
+
+func TestServeHTTP_RejectsMissingOrWrongSecretToken(t *testing.T) {
+	send := &fakeSender{}
+	h := newHandler(send, &fakeFiles{}, "correct-secret", fakeDrafter{}, fakeTracker{}, fakeResolver{}, testLogger())
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader([]byte("{}")))
+	req.Header.Set(secretHeaderName, "wrong-secret")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	if len(send.sent) != 0 {
+		t.Fatal("no reply should be sent for an unverified request")
+	}
+}
+
+func TestServeHTTP_AcknowledgesBeforeTicketWorkWithDetachedContext(t *testing.T) {
+	started := make(chan context.Context)
+	release := make(chan struct{})
+	send := &fakeSender{done: make(chan struct{})}
+	h := newHandler(send, &fakeFiles{}, "secret", blockingDrafter{started: started, release: release}, fakeTracker{ticket: domain.Ticket{Key: "MA-1"}}, fakeResolver{}, testLogger())
+
+	update := tgbotapi.Update{Message: &tgbotapi.Message{
+		Chat: &tgbotapi.Chat{ID: 42}, Text: "/to-ticket",
+		ReplyToMessage: &tgbotapi.Message{From: &tgbotapi.User{UserName: "alice"}, Text: "it broke"},
+	}}
+	requestContext, cancelRequest := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodPost, "/webhook", newUpdateBody(t, update)).WithContext(requestContext)
+	req.Header.Set(secretHeaderName, "secret")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	cancelRequest()
+
+	select {
+	case processingContext := <-started:
+		if err := processingContext.Err(); err != nil {
+			t.Fatalf("ticket context inherited cancellation from webhook request: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ticket work did not start")
+	}
+
+	close(release)
+	select {
+	case <-send.done:
+	case <-time.After(time.Second):
+		t.Fatal("ticket work did not finish")
+	}
+}
+
+func TestServeHTTP_NoReplyTargetSendsUsageHint(t *testing.T) {
+	send := &fakeSender{}
+	h := newHandler(send, &fakeFiles{}, "secret", fakeDrafter{}, fakeTracker{}, fakeResolver{}, testLogger())
+
+	update := tgbotapi.Update{Message: &tgbotapi.Message{
+		MessageID: 1,
+		Chat:      &tgbotapi.Chat{ID: 42},
+		Text:      "/to-ticket",
+	}}
+	h.processTicket(update.Message)
+	if len(send.sent) != 1 || send.sent[0].Text != usageHint {
+		t.Fatalf("sent = %+v, want a single usage-hint reply", send.sent)
+	}
+}
+
+func TestServeHTTP_SuccessRepliesWithCreatedMessage(t *testing.T) {
+	send := &fakeSender{}
+	tracker := fakeTracker{ticket: domain.Ticket{Key: "MA-1", URL: "https://jira.example/browse/MA-1"}}
+	drafter := fakeDrafter{draft: domain.Draft{Title: "Export crashes"}}
+	h := newHandler(send, &fakeFiles{}, "secret", drafter, tracker, fakeResolver{}, testLogger())
+
+	update := tgbotapi.Update{Message: &tgbotapi.Message{
+		MessageID: 2,
+		Chat:      &tgbotapi.Chat{ID: 42},
+		Text:      "/to-ticket",
+		ReplyToMessage: &tgbotapi.Message{
+			From: &tgbotapi.User{UserName: "alice"},
+			Text: "Safari crashes on export",
+			Date: 100,
+		},
+	}}
+	h.processTicket(update.Message)
+
+	if len(send.sent) != 1 {
+		t.Fatalf("sent = %+v, want a single reply", send.sent)
+	}
+	want := "Created MA-1: Export crashes — https://jira.example/browse/MA-1"
+	if send.sent[0].Text != want {
+		t.Fatalf("reply = %q, want %q", send.sent[0].Text, want)
+	}
+}
+
+func TestServeHTTP_UnresolvedAssigneeNotedInReply(t *testing.T) {
+	send := &fakeSender{}
+	tracker := fakeTracker{ticket: domain.Ticket{Key: "MA-2", URL: "https://jira.example/browse/MA-2"}}
+	resolver := fakeResolver{ok: false}
+	h := newHandler(send, &fakeFiles{}, "secret", fakeDrafter{}, tracker, resolver, testLogger())
+
+	update := tgbotapi.Update{Message: &tgbotapi.Message{
+		Chat: &tgbotapi.Chat{ID: 42},
+		Text: "/to-ticket @nobody",
+		ReplyToMessage: &tgbotapi.Message{
+			From: &tgbotapi.User{UserName: "alice"},
+			Text: "it broke",
+		},
+	}}
+	h.processTicket(update.Message)
+
+	if len(send.sent) != 1 {
+		t.Fatalf("sent = %+v, want a single reply", send.sent)
+	}
+	if !bytes.Contains([]byte(send.sent[0].Text), []byte("nobody")) {
+		t.Fatalf("reply = %q, want it to mention the unresolved assignee", send.sent[0].Text)
+	}
+}
+
+func TestServeHTTP_GeminiFailureRepliesWithClearError(t *testing.T) {
+	send := &fakeSender{}
+	drafter := fakeDrafter{err: errors.New("timeout")}
+	h := newHandler(send, &fakeFiles{}, "secret", drafter, fakeTracker{}, fakeResolver{}, testLogger())
+
+	update := tgbotapi.Update{Message: &tgbotapi.Message{
+		Chat:           &tgbotapi.Chat{ID: 42},
+		Text:           "/to-ticket",
+		ReplyToMessage: &tgbotapi.Message{From: &tgbotapi.User{UserName: "alice"}, Text: "it broke"},
+	}}
+	h.processTicket(update.Message)
+
+	if len(send.sent) != 1 || !bytes.Contains([]byte(send.sent[0].Text), []byte("Gemini")) {
+		t.Fatalf("sent = %+v, want a reply distinguishing the Gemini failure", send.sent)
+	}
+}
+
+func TestServeHTTP_JiraFailureSurfacesErrorMessages(t *testing.T) {
+	send := &fakeSender{}
+	tracker := fakeTracker{err: errors.New("jira: create issue failed (400): issuetype is required")}
+	h := newHandler(send, &fakeFiles{}, "secret", fakeDrafter{}, tracker, fakeResolver{}, testLogger())
+
+	update := tgbotapi.Update{Message: &tgbotapi.Message{
+		Chat:           &tgbotapi.Chat{ID: 42},
+		Text:           "/to-ticket",
+		ReplyToMessage: &tgbotapi.Message{From: &tgbotapi.User{UserName: "alice"}, Text: "it broke"},
+	}}
+	h.processTicket(update.Message)
+
+	if len(send.sent) != 1 || !bytes.Contains([]byte(send.sent[0].Text), []byte("issuetype is required")) {
+		t.Fatalf("sent = %+v, want Jira's errorMessages surfaced", send.sent)
+	}
+}
+
+func TestServeHTTP_IgnoresNonTicketCommands(t *testing.T) {
+	send := &fakeSender{}
+	h := newHandler(send, &fakeFiles{}, "secret", fakeDrafter{}, fakeTracker{}, fakeResolver{}, testLogger())
+
+	update := tgbotapi.Update{Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: 42}, Text: "just chatting"}}
+	req := httptest.NewRequest(http.MethodPost, "/webhook", newUpdateBody(t, update))
+	req.Header.Set(secretHeaderName, "secret")
+	rec := httptest.NewRecorder()
+
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if len(send.sent) != 0 {
+		t.Fatalf("sent = %+v, want no reply for a non-command message", send.sent)
+	}
+}
