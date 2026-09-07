@@ -44,10 +44,12 @@ const (
 	statusLookupTimeout = 30 * time.Second
 )
 
-// sender is the subset of *tgbotapi.BotAPI this adapter uses to reply into
-// a chat. Abstracted so tests can fake it instead of calling Telegram.
-type sender interface {
+// botClient is the subset of *tgbotapi.BotAPI this adapter uses: sending a
+// reply into a chat, and non-message API calls such as setMyCommands.
+// Abstracted so tests can fake it instead of calling Telegram.
+type botClient interface {
 	Send(c tgbotapi.Chattable) (tgbotapi.Message, error)
+	Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error)
 }
 
 // fileDownloader is the subset of Telegram file access this adapter needs:
@@ -60,7 +62,7 @@ type fileDownloader interface {
 
 // Handler is the inbound Telegram webhook adapter.
 type Handler struct {
-	send        sender
+	send        botClient
 	files       fileDownloader
 	secretToken string
 	allowlist   domain.ChatAllowlist
@@ -86,7 +88,34 @@ func New(botToken, secretToken string, allowlist domain.ChatAllowlist, drafter p
 	return h, nil
 }
 
-func newHandler(send sender, files fileDownloader, secretToken string, allowlist domain.ChatAllowlist, drafter ports.TicketDrafter, tracker ports.IssueTracker, resolver ports.AssigneeResolver, logger *slog.Logger) *Handler {
+// botCommands is the command menu Telegram clients show for this bot. It is
+// derived from the commands ServeHTTP actually routes, so the menu cannot
+// drift from what the handler understands.
+func botCommands() []tgbotapi.BotCommand {
+	return []tgbotapi.BotCommand{
+		{
+			Command:     strings.TrimPrefix(commandToTicket, "/"),
+			Description: "Reply to a message to file it as a Jira ticket",
+		},
+		{
+			Command:     strings.TrimPrefix(commandStatus, "/"),
+			Description: "Reply to one of my confirmations to check its status",
+		},
+	}
+}
+
+// RegisterCommands publishes the command menu to Telegram (setMyCommands),
+// which is what populates command autocomplete in clients and the command
+// list BotFather shows. It is bot-wide account state, not per-revision, so
+// calling it on every startup just re-asserts the same list.
+func (h *Handler) RegisterCommands() error {
+	if _, err := h.send.Request(tgbotapi.NewSetMyCommands(botCommands()...)); err != nil {
+		return fmt.Errorf("telegram: set my commands: %w", err)
+	}
+	return nil
+}
+
+func newHandler(send botClient, files fileDownloader, secretToken string, allowlist domain.ChatAllowlist, drafter ports.TicketDrafter, tracker ports.IssueTracker, resolver ports.AssigneeResolver, logger *slog.Logger) *Handler {
 	return &Handler{
 		send:        send,
 		files:       files,

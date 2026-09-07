@@ -63,6 +63,12 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("create telegram adapter: %w", err)
 	}
 
+	// The command menu is cosmetic (autocomplete in clients), so a Telegram
+	// hiccup here must not take the service down.
+	if err := webhook.RegisterCommands(); err != nil {
+		logger.Warn("register telegram commands", "error", err)
+	}
+
 	addr := ":" + env("PORT", "8080")
 	mux := httpserver.NewMux()
 	mux.Handle("/webhook/telegram", webhook)

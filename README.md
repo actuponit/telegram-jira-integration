@@ -421,6 +421,7 @@ audit store).
 | --- | --- | --- |
 | Revision won't start, logs say `startup failed: missing required env vars: ...` | a value never made it onto the service | Re-run `10-secrets.sh` / check `deploy/config.env`, then `20-deploy.sh` |
 | `startup failed: validate jira config` | wrong project key, or the account lacks access, or a needed issue type / priority / the Sprint field is absent from that project | Check `JIRA_PROJECT_KEY` and the account's project permissions |
+| BotFather shows `Commands: no commands yet`, no autocomplete in clients | the command menu was never published to Telegram | Deploy — startup calls `setMyCommands` (`Handler.RegisterCommands`); a failure is logged as `register telegram commands` and is non-fatal |
 | Bot silent in the group | privacy mode still on, or the chat ID isn't in `TELEGRAM_ALLOWED_CHATS` | BotFather → *Group Privacy* → off; verify the chat ID with `getUpdates` |
 | Webhook calls return 401 | Secret Manager's `telegram-webhook-secret` and the token registered with Telegram have drifted apart | `./deploy/30-set-webhook.sh` |
 | `getWebhookInfo` shows a `last_error_message` | the service returned non-2xx for that update | Read logs for that message ID |

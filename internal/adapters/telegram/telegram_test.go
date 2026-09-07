@@ -30,9 +30,19 @@ const (
 // --- fakes ---
 
 type fakeSender struct {
-	sent []tgbotapi.MessageConfig
-	err  error
-	done chan struct{}
+	sent       []tgbotapi.MessageConfig
+	requested  []tgbotapi.Chattable
+	err        error
+	requestErr error
+	done       chan struct{}
+}
+
+func (f *fakeSender) Request(c tgbotapi.Chattable) (*tgbotapi.APIResponse, error) {
+	f.requested = append(f.requested, c)
+	if f.requestErr != nil {
+		return nil, f.requestErr
+	}
+	return &tgbotapi.APIResponse{Ok: true}, nil
 }
 
 func (f *fakeSender) Send(c tgbotapi.Chattable) (tgbotapi.Message, error) {
@@ -673,5 +683,50 @@ func TestCommandName(t *testing.T) {
 		if got := commandName(text); got != want {
 			t.Errorf("commandName(%q) = %q, want %q", text, got, want)
 		}
+	}
+}
+
+func TestRegisterCommandsPublishesEveryRoutedCommand(t *testing.T) {
+	send := &fakeSender{}
+	h := newHandler(send, &fakeFiles{}, "secret", domain.NewChatAllowlist(allowedChatID), fakeDrafter{}, fakeTracker{}, fakeResolver{}, testLogger())
+
+	if err := h.RegisterCommands(); err != nil {
+		t.Fatalf("RegisterCommands() = %v, want nil", err)
+	}
+
+	if len(send.requested) != 1 {
+		t.Fatalf("requests = %d, want 1", len(send.requested))
+	}
+	config, ok := send.requested[0].(tgbotapi.SetMyCommandsConfig)
+	if !ok {
+		t.Fatalf("request = %T, want tgbotapi.SetMyCommandsConfig", send.requested[0])
+	}
+
+	published := map[string]string{}
+	for _, command := range config.Commands {
+		published[command.Command] = command.Description
+	}
+	for _, routed := range []string{commandToTicket, commandStatus} {
+		name := strings.TrimPrefix(routed, "/")
+		description, found := published[name]
+		if !found {
+			t.Fatalf("command %q is routed but not published to Telegram", name)
+		}
+		// Telegram rejects descriptions shorter than 3 characters.
+		if len(description) < 3 {
+			t.Fatalf("description for %q = %q, too short for Telegram", name, description)
+		}
+	}
+	if len(published) != 2 {
+		t.Fatalf("published %d commands, want only the routed ones", len(published))
+	}
+}
+
+func TestRegisterCommandsReturnsTelegramError(t *testing.T) {
+	send := &fakeSender{requestErr: errors.New("telegram down")}
+	h := newHandler(send, &fakeFiles{}, "secret", domain.NewChatAllowlist(allowedChatID), fakeDrafter{}, fakeTracker{}, fakeResolver{}, testLogger())
+
+	if err := h.RegisterCommands(); err == nil {
+		t.Fatal("RegisterCommands() = nil, want an error when Telegram rejects the call")
 	}
 }
