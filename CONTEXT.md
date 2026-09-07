@@ -5,7 +5,7 @@ Single-context repo. Read this before exploring or making changes; check
 
 ## Core terms
 
-- **Ticket Request** — a Telegram `/to-ticket [@assignee]` command, always sent
+- **Ticket Request** — a Telegram `/to_ticket [@assignee]` command, always sent
   as a reply to another message. The replied-to message is the **source
   message**.
 - **Draft** — the structured `{title, description, issue_type, priority,

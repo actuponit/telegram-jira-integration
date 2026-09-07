@@ -83,7 +83,7 @@ Rotating `TELEGRAM_BOT_TOKEN` or `TELEGRAM_WEBHOOK_SECRET` also needs
 - `getWebhookInfo` points at `<service-url>/webhook/telegram`.
 - Recent Cloud Logging output for the service.
 
-The last acceptance check is manual: send `/to-ticket` as a reply to a
+The last acceptance check is manual: send `/to_ticket` as a reply to a
 message in the allowlisted chat and confirm a real Jira Issue is created and
 its link comes back in chat. A command sent from a non-allowlisted chat must
 be ignored outright.

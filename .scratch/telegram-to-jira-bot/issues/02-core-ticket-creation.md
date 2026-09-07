@@ -1,6 +1,6 @@
 # 02 — Core ticket creation
 
-**What to build:** a Telegram group member replies `/to-ticket [@assignee]` to a message and gets a real Jira Issue back, linked in the same thread. Covers the full `/to-ticket` behavior: webhook security, Draft generation via Gemini using the source message's full reply-chain context, assignee resolution (empty/resolved/unresolved), Issue creation on the fixed Sprint with image/video media handling, and clear chat-visible errors on any failure. This is the bot's core value end to end.
+**What to build:** a Telegram group member replies `/to_ticket [@assignee]` to a message and gets a real Jira Issue back, linked in the same thread. Covers the full `/to_ticket` behavior: webhook security, Draft generation via Gemini using the source message's full reply-chain context, assignee resolution (empty/resolved/unresolved), Issue creation on the fixed Sprint with image/video media handling, and clear chat-visible errors on any failure. This is the bot's core value end to end.
 
 **Blocked by:** 01 — Project scaffold
 
@@ -14,7 +14,7 @@
 - [x] Image attachment (`*ports.Attachment`) passed through the usecase to `IssueTracker.CreateIssue` untouched
 - [x] Video URL linked into the Draft description by the usecase, never downloaded
 - [x] Telegram webhook handler verifies the `secret_token` on every incoming request — ticket 09
-- [x] `/to-ticket` with no reply target gets a usage-hint response — ticket 09
+- [x] `/to_ticket` with no reply target gets a usage-hint response — ticket 09
 - [x] Source message + its own reply chain gathered, each tagged with sender name and timestamp — ticket 09
 - [x] `gemini` adapter implements `TicketDrafter` via `google.golang.org/genai` — ticket 07
 - [x] `config` adapter implements `AssigneeResolver`, loading `configs/assignees.yaml` — ticket 06

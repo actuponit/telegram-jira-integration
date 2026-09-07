@@ -123,10 +123,10 @@ func TestParseToTicketCommand(t *testing.T) {
 		wantAssignee string
 		wantOK       bool
 	}{
-		{"plain command", "/to-ticket", "", true},
-		{"command with bot suffix", "/to-ticket@MyBot", "", true},
-		{"command with assignee", "/to-ticket @alice", "@alice", true},
-		{"command with bot suffix and assignee", "/to-ticket@MyBot @alice", "@alice", true},
+		{"plain command", "/to_ticket", "", true},
+		{"command with bot suffix", "/to_ticket@MyBot", "", true},
+		{"command with assignee", "/to_ticket @alice", "@alice", true},
+		{"command with bot suffix and assignee", "/to_ticket@MyBot @alice", "@alice", true},
 		{"not a command", "hello there", "", false},
 		{"empty text", "", "", false},
 		{"different command", "/status", "", false},
@@ -339,7 +339,7 @@ func TestServeHTTP_AcknowledgesBeforeTicketWorkWithDetachedContext(t *testing.T)
 	h := newHandler(send, &fakeFiles{}, "secret", domain.NewChatAllowlist(allowedChatID), blockingDrafter{started: started, release: release}, fakeTracker{ticket: domain.Ticket{Key: "MA-1"}}, fakeResolver{}, testLogger())
 
 	update := tgbotapi.Update{Message: &tgbotapi.Message{
-		Chat: &tgbotapi.Chat{ID: allowedChatID}, Text: "/to-ticket",
+		Chat: &tgbotapi.Chat{ID: allowedChatID}, Text: "/to_ticket",
 		ReplyToMessage: &tgbotapi.Message{From: &tgbotapi.User{UserName: "alice"}, Text: "it broke"},
 	}}
 	requestContext, cancelRequest := context.WithCancel(context.Background())
@@ -377,7 +377,7 @@ func TestServeHTTP_NoReplyTargetSendsUsageHint(t *testing.T) {
 	update := tgbotapi.Update{Message: &tgbotapi.Message{
 		MessageID: 1,
 		Chat:      &tgbotapi.Chat{ID: allowedChatID},
-		Text:      "/to-ticket",
+		Text:      "/to_ticket",
 	}}
 	h.processTicket(update.Message)
 	if len(send.sent) != 1 || send.sent[0].Text != usageHint {
@@ -394,7 +394,7 @@ func TestServeHTTP_SuccessRepliesWithCreatedMessage(t *testing.T) {
 	update := tgbotapi.Update{Message: &tgbotapi.Message{
 		MessageID: 2,
 		Chat:      &tgbotapi.Chat{ID: allowedChatID},
-		Text:      "/to-ticket",
+		Text:      "/to_ticket",
 		ReplyToMessage: &tgbotapi.Message{
 			From: &tgbotapi.User{UserName: "alice"},
 			Text: "Safari crashes on export",
@@ -420,7 +420,7 @@ func TestServeHTTP_UnresolvedAssigneeNotedInReply(t *testing.T) {
 
 	update := tgbotapi.Update{Message: &tgbotapi.Message{
 		Chat: &tgbotapi.Chat{ID: allowedChatID},
-		Text: "/to-ticket @nobody",
+		Text: "/to_ticket @nobody",
 		ReplyToMessage: &tgbotapi.Message{
 			From: &tgbotapi.User{UserName: "alice"},
 			Text: "it broke",
@@ -443,7 +443,7 @@ func TestServeHTTP_GeminiFailureRepliesWithClearError(t *testing.T) {
 
 	update := tgbotapi.Update{Message: &tgbotapi.Message{
 		Chat:           &tgbotapi.Chat{ID: allowedChatID},
-		Text:           "/to-ticket",
+		Text:           "/to_ticket",
 		ReplyToMessage: &tgbotapi.Message{From: &tgbotapi.User{UserName: "alice"}, Text: "it broke"},
 	}}
 	h.processTicket(update.Message)
@@ -460,7 +460,7 @@ func TestServeHTTP_JiraFailureSurfacesErrorMessages(t *testing.T) {
 
 	update := tgbotapi.Update{Message: &tgbotapi.Message{
 		Chat:           &tgbotapi.Chat{ID: allowedChatID},
-		Text:           "/to-ticket",
+		Text:           "/to_ticket",
 		ReplyToMessage: &tgbotapi.Message{From: &tgbotapi.User{UserName: "alice"}, Text: "it broke"},
 	}}
 	h.processTicket(update.Message)
@@ -507,7 +507,7 @@ func serveUpdate(t *testing.T, h *Handler, update tgbotapi.Update) *httptest.Res
 }
 
 func TestServeHTTP_CommandsFromNonAllowlistedChatHaveNoEffect(t *testing.T) {
-	for _, text := range []string{"/to-ticket", "/to-ticket @alice", "/status"} {
+	for _, text := range []string{"/to_ticket", "/to_ticket @alice", "/status"} {
 		send := &fakeSender{}
 		tracker := fakeTracker{ticket: domain.Ticket{Key: "MA-1"}}
 		h := newAllowlistedHandler(send, tracker)
@@ -539,7 +539,7 @@ func TestServeHTTP_IgnoredChatIsStillLoggedWithChatID(t *testing.T) {
 	serveUpdate(t, h, tgbotapi.Update{Message: &tgbotapi.Message{
 		MessageID: 9,
 		Chat:      &tgbotapi.Chat{ID: 999},
-		Text:      "/to-ticket",
+		Text:      "/to_ticket",
 	}})
 
 	logged := logs.String()
@@ -555,7 +555,7 @@ func TestServeHTTP_AllowlistedChatIsProcessed(t *testing.T) {
 	h.processTicket(&tgbotapi.Message{
 		MessageID:      1,
 		Chat:           &tgbotapi.Chat{ID: allowedChatID},
-		Text:           "/to-ticket",
+		Text:           "/to_ticket",
 		ReplyToMessage: &tgbotapi.Message{From: &tgbotapi.User{UserName: "alice"}, Text: "it broke"},
 	})
 
@@ -662,8 +662,8 @@ func TestRenderStatus_AssigneeLabelFallsBackToAccountID(t *testing.T) {
 
 func TestCommandName(t *testing.T) {
 	cases := map[string]string{
-		"/to-ticket":            commandToTicket,
-		"/to-ticket@MyBot @bob": commandToTicket,
+		"/to_ticket":            commandToTicket,
+		"/to_ticket@MyBot @bob": commandToTicket,
 		"/STATUS":               commandStatus,
 		"/status@MyBot":         commandStatus,
 		"just chatting":         "",

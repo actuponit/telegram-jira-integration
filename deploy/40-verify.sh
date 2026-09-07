@@ -23,5 +23,5 @@ echo "==> Last 20 log lines"
 gc run services logs read "${SERVICE_NAME}" --region "${REGION}" --limit 20 || true
 
 echo
-echo "Remaining manual check: send /to-ticket as a reply in the allowlisted"
+echo "Remaining manual check: send /to_ticket as a reply in the allowlisted"
 echo "chat and confirm a real Jira Issue is created and linked back in chat."

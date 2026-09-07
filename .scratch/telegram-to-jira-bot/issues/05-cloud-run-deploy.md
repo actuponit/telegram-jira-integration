@@ -10,7 +10,7 @@
 - [x] `TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`, `JIRA_API_TOKEN`, and the webhook `secret_token` are all sourced from Google Secret Manager via Cloud Run's native integration — `deploy/10-secrets.sh` creates them and grants the runtime service account `secretAccessor`; `deploy/20-deploy.sh` wires them with `--set-secrets`
 - [x] `TELEGRAM_ALLOWED_CHATS` set on the Cloud Run service to the allowlisted chat ID(s) — a plain env var, not a secret; startup fails if it is missing or empty (ticket 03) — passed via `--set-env-vars` from `deploy/config.env`
 - [x] Telegram webhook registered against the deployed Cloud Run URL with the `secret_token` set — `deploy/30-set-webhook.sh`, both values read from Secret Manager
-- [ ] A real `/to-ticket` sent in the allowlisted chat against the deployed instance produces a real Jira Issue and chat reply
+- [ ] A real `/to_ticket` sent in the allowlisted chat against the deployed instance produces a real Jira Issue and chat reply
 - [x] Health-check endpoint responds on the deployed instance — asserted by `deploy/40-verify.sh`
 
 ## Comments
@@ -34,7 +34,7 @@ Remaining work is operator-only, per `docs/deploy.md`:
    region, Jira coordinates, and the allowlisted chat ID(s)
 2. run `deploy/00-bootstrap.sh` → `10-secrets.sh` → `20-deploy.sh` →
    `30-set-webhook.sh` → `40-verify.sh`
-3. send a real `/to-ticket` in the allowlisted chat and tick the last box
+3. send a real `/to_ticket` in the allowlisted chat and tick the last box
 
 `--allow-unauthenticated` is deliberate: Telegram calls the webhook
 anonymously, and authenticity is enforced in-process by the

@@ -45,7 +45,7 @@ JS-only, under-documented platform was rejected.
   in the context window are not touched.
 - **Access control:** allowlist by Telegram chat ID only. No per-user
   allowlist inside the group — anyone in the allowlisted chat can run
-  `/to-ticket`.
+  `/to_ticket`.
 - **Jira scope:** single project, no per-topic routing.
 - **UX:** fire-and-forget. The bot creates the Issue immediately and replies
   with the link; there is no confirm/edit step before creation. The reply

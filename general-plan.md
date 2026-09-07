@@ -6,7 +6,7 @@ A Telegram bot that lives in your work group. When a discussion resolves into
 "this should be a ticket," someone **replies to the relevant message** with:
 
 ```
-/to-ticket [@assignee]
+/to_ticket [@assignee]
 ```
 
 The bot then:
@@ -46,7 +46,7 @@ The bot then:
 
 ```
 User A: "the export button crashes on Safari when the file is >50MB"
-User B: (replies to A's message) "/to-ticket @userC"
+User B: (replies to A's message) "/to_ticket @userC"
 
 Bot:
   1. Detects command, extracts replied-to message text + author + timestamp
@@ -59,8 +59,8 @@ Bot:
 ```
 
 ### Command parsing
-- `/to-ticket` with no argument → ticket created, `assignee: null` (unassigned in Jira).
-- `/to-ticket @someone` → look up `someone` in a maintained mapping table (Telegram
+- `/to_ticket` with no argument → ticket created, `assignee: null` (unassigned in Jira).
+- `/to_ticket @someone` → look up `someone` in a maintained mapping table (Telegram
   username → Jira accountId). This mapping **cannot** be derived automatically —
   Telegram usernames and Jira accounts aren't linked anywhere — so you'll maintain
   a small static config (a YAML/JSON file or env var) of `telegram_username: jira_account_id`.
@@ -168,7 +168,7 @@ Keep this a soft failure — never block ticket creation because an assignee did
 
 - **Restrict the bot to your specific group**: check `update.Message.Chat.ID` against
   an allowlisted chat ID; ignore commands from anywhere else.
-- **Don't trust `/to-ticket` from just anyone in the group** if that matters to you —
+- **Don't trust `/to_ticket` from just anyone in the group** if that matters to you —
   optionally restrict to a list of Telegram user IDs allowed to file tickets.
 - Store `TELEGRAM_BOT_TOKEN`, `GEMINI_API_KEY`, `JIRA_API_TOKEN` as secrets
   (env vars / secret manager), never in source.

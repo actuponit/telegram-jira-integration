@@ -7,7 +7,7 @@
 **Status:** done
 
 - [x] Allowlisted chat ID is configurable (env/config, not hardcoded) — `TELEGRAM_ALLOWED_CHATS`, comma-separated, parsed by `config.ParseChatAllowlist` into `domain.ChatAllowlist`
-- [x] `/to-ticket` and `/status` from any other chat ID produce no bot response and no side effects — gate sits in `Handler.ServeHTTP` before any goroutine is dispatched
+- [x] `/to_ticket` and `/status` from any other chat ID produce no bot response and no side effects — gate sits in `Handler.ServeHTTP` before any goroutine is dispatched
 - [x] Ignored commands are still logged (chat ID visible) for diagnosability
 - [x] No per-user allowlist inside the group — chat-level only
 

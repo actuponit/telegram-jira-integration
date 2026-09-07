@@ -1,5 +1,5 @@
 // Package telegram implements the inbound Telegram webhook handler: it
-// parses the /to-ticket command, gathers reply-chain context, extracts
+// parses the /to_ticket command, gathers reply-chain context, extracts
 // media, calls usecase.CreateTicketFromMessage, and renders the result
 // back into the chat.
 package telegram
@@ -26,10 +26,10 @@ import (
 )
 
 const (
-	commandToTicket  = "/to-ticket"
+	commandToTicket  = "/to_ticket"
 	commandStatus    = "/status"
 	secretHeaderName = "X-Telegram-Bot-Api-Secret-Token"
-	usageHint        = "Usage: reply to the message you want turned into a ticket with /to-ticket [@assignee]"
+	usageHint        = "Usage: reply to the message you want turned into a ticket with /to_ticket [@assignee]"
 	statusUsageHint  = "Usage: reply /status to one of my \"Created <KEY>: ...\" confirmation messages."
 
 	// ticketProcessingTimeout bounds the whole asynchronous ticket flow,
@@ -306,8 +306,8 @@ func classifyCreateTicketError(err error) (stage, chatMessage string) {
 	}
 }
 
-// parseToTicketCommand reports whether text is a /to-ticket command
-// (optionally addressed to this bot, e.g. "/to-ticket@MyBot"), and returns
+// parseToTicketCommand reports whether text is a /to_ticket command
+// (optionally addressed to this bot, e.g. "/to_ticket@MyBot"), and returns
 // its optional @assignee argument, empty when omitted.
 func parseToTicketCommand(text string) (assignee string, ok bool) {
 	if commandName(text) != commandToTicket {
@@ -321,8 +321,8 @@ func parseToTicketCommand(text string) (assignee string, ok bool) {
 }
 
 // commandName returns the bare, lowercased command word of text, stripping
-// any "@BotName" suffix Telegram appends in groups ("/to-ticket@MyBot foo"
-// -> "/to-ticket"). It returns "" when text does not start with a command.
+// any "@BotName" suffix Telegram appends in groups ("/to_ticket@MyBot foo"
+// -> "/to_ticket"). It returns "" when text does not start with a command.
 func commandName(text string) string {
 	fields := strings.Fields(text)
 	if len(fields) == 0 {
