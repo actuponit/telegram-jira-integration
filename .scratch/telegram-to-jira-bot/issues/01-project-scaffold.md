@@ -4,13 +4,13 @@
 
 **Blocked by:** None — can start immediately.
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] `go.mod` initialized, module builds and runs
-- [ ] `internal/domain` defines `Ticket`, `Draft`, `Priority`, `IssueType`, `Assignee` as pure types with no imports beyond the standard library
-- [ ] `internal/ports` defines `TicketDrafter`, `IssueTracker`, `AssigneeResolver` interfaces, named for what the use case needs (not vendor names)
-- [ ] `internal/adapters/{telegram,gemini,jira,config}` exist as empty packages (no vendor SDK wired yet)
-- [ ] `internal/platform/logging` emits structured JSON to stdout
-- [ ] `internal/platform/httpserver` starts an HTTP server with a health-check endpoint
-- [ ] `cmd/bot/main.go` wires the above and starts the server; contains no business logic
-- [ ] Layout matches `CONTEXT.md`'s "Where things live" section exactly
+- [x] `go.mod` initialized, module builds and runs
+- [x] `internal/domain` defines `Ticket`, `Draft`, `Priority`, `IssueType`, `Assignee` as pure types with no imports beyond the standard library
+- [x] `internal/ports` defines `TicketDrafter`, `IssueTracker`, `AssigneeResolver` interfaces, named for what the use case needs (not vendor names)
+- [x] `internal/adapters/{telegram,gemini,jira,config}` exist as empty packages (no vendor SDK wired yet)
+- [x] `internal/platform/logging` emits structured JSON to stdout
+- [x] `internal/platform/httpserver` starts an HTTP server with a health-check endpoint
+- [x] `cmd/bot/main.go` wires the above and starts the server; contains no business logic
+- [x] Layout matches `CONTEXT.md`'s "Where things live" section exactly
