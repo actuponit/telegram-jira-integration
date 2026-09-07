@@ -1,0 +1,45 @@
+{
+  "expand": "projects",
+  "projects": [
+    {
+      "id": "10000",
+      "key": "MA",
+      "name": "Mela App",
+      "issuetypes": [
+        {
+          "id": "1",
+          "name": "Bug",
+          "fields": {
+            "summary": { "name": "Summary" },
+            "priority": {
+              "name": "Priority",
+              "allowedValues": [
+                { "name": "Highest" },
+                { "name": "High" },
+                { "name": "Medium" },
+                { "name": "Low" }
+              ]
+            },
+            "customfield_10020": { "name": "Sprint" }
+          }
+        },
+        {
+          "id": "2",
+          "name": "Task",
+          "fields": {
+            "summary": { "name": "Summary" },
+            "customfield_10020": { "name": "Sprint" }
+          }
+        },
+        {
+          "id": "3",
+          "name": "Story",
+          "fields": {
+            "summary": { "name": "Summary" },
+            "customfield_10020": { "name": "Sprint" }
+          }
+        }
+      ]
+    }
+  ]
+}

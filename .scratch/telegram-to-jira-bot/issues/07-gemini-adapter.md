@@ -4,15 +4,15 @@
 
 **Blocked by:** 01 — Project scaffold
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [ ] Implements `ports.TicketDrafter.Draft(ctx, []ports.Message) (domain.Draft, error)`
-- [ ] Uses `google.golang.org/genai`, model `gemini-2.5-flash`
-- [ ] `responseSchema`/`responseMimeType: application/json` returning `{title, description, issue_type, priority, labels}`; `issue_type` enum `Bug`/`Task`/`Story`, `priority` enum `Highest`/`High`/`Medium`/`Low`
-- [ ] System instruction: stay factual, never invent details absent from the conversation, default to Medium priority when severity is unclear
-- [ ] Each `ports.Message` (sender name + timestamp + text) rendered into the prompt content, not flattened into an unattributed blob
-- [ ] Gemini timeout/error returns a plain Go `error` — no panics, no partial `domain.Draft`
-- [ ] Contract test against a recorded structured-output fixture (saved JSON response) confirms the schema still round-trips into a `domain.Draft` — no live Gemini call in this test
+- [x] Implements `ports.TicketDrafter.Draft(ctx, []ports.Message) (domain.Draft, error)`
+- [x] Uses `google.golang.org/genai`, model `gemini-2.5-flash`
+- [x] `responseSchema`/`responseMimeType: application/json` returning `{title, description, issue_type, priority, labels}`; `issue_type` enum `Bug`/`Task`/`Story`, `priority` enum `Highest`/`High`/`Medium`/`Low`
+- [x] System instruction: stay factual, never invent details absent from the conversation, default to Medium priority when severity is unclear
+- [x] Each `ports.Message` (sender name + timestamp + text) rendered into the prompt content, not flattened into an unattributed blob
+- [x] Gemini timeout/error returns a plain Go `error` — no panics, no partial `domain.Draft`
+- [x] Contract test against a recorded structured-output fixture (saved JSON response) confirms the schema still round-trips into a `domain.Draft` — no live Gemini call in this test
 
 ## Comments
 
