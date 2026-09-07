@@ -21,6 +21,16 @@ steps:
       - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE_NAME}:latest'
       - '.'
 
+  # `images:` below only pushes after every step succeeds, which is too
+  # late for the deploy step that follows — it needs the tag in the
+  # registry already, so push explicitly here first.
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE_NAME}'
+
   # --allow-unauthenticated is required: Telegram calls the webhook
   # anonymously. Authenticity is enforced in-process by verifying the
   # X-Telegram-Bot-Api-Secret-Token header against TELEGRAM_WEBHOOK_SECRET.
