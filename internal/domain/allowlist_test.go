@@ -23,9 +23,6 @@ func TestChatAllowlist_AllowsOnlyListedChats(t *testing.T) {
 func TestChatAllowlist_ZeroValueFailsClosed(t *testing.T) {
 	var allowlist domain.ChatAllowlist
 
-	if !allowlist.IsEmpty() {
-		t.Error("zero-value allowlist should report empty")
-	}
 	if allowlist.Allows(0) || allowlist.Allows(-100123) {
 		t.Error("zero-value allowlist should allow nothing")
 	}
@@ -34,9 +31,6 @@ func TestChatAllowlist_ZeroValueFailsClosed(t *testing.T) {
 func TestChatAllowlist_EmptyConstructedListFailsClosed(t *testing.T) {
 	allowlist := domain.NewChatAllowlist()
 
-	if !allowlist.IsEmpty() {
-		t.Error("allowlist built from no IDs should report empty")
-	}
 	if allowlist.Allows(-100123) {
 		t.Error("empty allowlist should allow nothing")
 	}

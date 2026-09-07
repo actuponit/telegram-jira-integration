@@ -69,6 +69,7 @@ type Handler struct {
 	tracker     ports.IssueTracker
 	resolver    ports.AssigneeResolver
 	logger      *slog.Logger
+	dispatch    func(func())
 }
 
 // New creates a Handler backed by a real Telegram bot client.
@@ -95,6 +96,7 @@ func newHandler(send sender, files fileDownloader, secretToken string, allowlist
 		tracker:     tracker,
 		resolver:    resolver,
 		logger:      logger,
+		dispatch:    func(work func()) { go work() },
 	}
 }
 
@@ -168,9 +170,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// r.Context(): it is canceled when this webhook request ends.
 	switch command {
 	case commandToTicket:
-		go h.processTicket(message)
+		h.dispatch(func() { h.processTicket(message) })
 	case commandStatus:
-		go h.processStatus(message)
+		h.dispatch(func() { h.processStatus(message) })
 	}
 }
 

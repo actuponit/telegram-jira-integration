@@ -25,9 +25,3 @@ func (a ChatAllowlist) Allows(chatID int64) bool {
 	_, ok := a.ids[chatID]
 	return ok
 }
-
-// IsEmpty reports whether the allowlist names no chat at all, in which case
-// Allows is false for every chat.
-func (a ChatAllowlist) IsEmpty() bool {
-	return len(a.ids) == 0
-}

@@ -511,6 +511,8 @@ func TestServeHTTP_CommandsFromNonAllowlistedChatHaveNoEffect(t *testing.T) {
 		send := &fakeSender{}
 		tracker := fakeTracker{ticket: domain.Ticket{Key: "MA-1"}}
 		h := newAllowlistedHandler(send, tracker)
+		dispatched := false
+		h.dispatch = func(func()) { dispatched = true }
 
 		update := tgbotapi.Update{Message: &tgbotapi.Message{
 			MessageID:      9,
@@ -523,11 +525,8 @@ func TestServeHTTP_CommandsFromNonAllowlistedChatHaveNoEffect(t *testing.T) {
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%q: status = %d, want 200", text, rec.Code)
 		}
-		// The command is dispatched to a goroutine when allowed, so give a
-		// wrongly-allowed command a chance to reply before asserting silence.
-		time.Sleep(50 * time.Millisecond)
-		if len(send.sent) != 0 {
-			t.Fatalf("%q from a non-allowlisted chat: sent = %+v, want no reply", text, send.sent)
+		if dispatched {
+			t.Fatalf("%q from a non-allowlisted chat was dispatched, want no processing", text)
 		}
 	}
 }
