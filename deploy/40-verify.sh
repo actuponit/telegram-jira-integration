@@ -5,8 +5,8 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 URL="$(service_url)"
 [[ -n "${URL}" ]] || { echo "error: service ${SERVICE_NAME} not deployed" >&2; exit 1; }
 
-echo "==> Health check ${URL}/healthz"
-code="$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/healthz")"
+echo "==> Health check ${URL}/health"
+code="$(curl -sS -o /dev/null -w '%{http_code}' "${URL}/health")"
 echo "    HTTP ${code}"
 [[ "${code}" == "200" ]] || { echo "error: health check failed" >&2; exit 1; }
 

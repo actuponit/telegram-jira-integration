@@ -10,7 +10,7 @@ import (
 // NewMux returns the HTTP mux with the health-check route registered.
 func NewMux() *http.ServeMux {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
 	return mux

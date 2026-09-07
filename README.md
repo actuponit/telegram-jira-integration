@@ -268,7 +268,7 @@ priorities, and the Sprint field. Success looks like:
 Health check:
 
 ```bash
-curl -i localhost:8080/healthz    # expect 200
+curl -i localhost:8080/health    # expect 200
 ```
 
 Tests:
@@ -359,7 +359,7 @@ Manager — you type neither. Expect `{"ok":true,...}`.
 ./deploy/40-verify.sh
 ```
 
-Asserts `/healthz` returns 200, confirms `getWebhookInfo` points at this
+Asserts `/health` returns 200, confirms `getWebhookInfo` points at this
 service, and prints the last 20 log lines.
 
 Then the one check no script can do: in the allowlisted group, reply
@@ -437,7 +437,7 @@ internal/domain/      pure types (Ticket, Draft, Priority, Assignee, ChatAllowli
 internal/usecase/     CreateTicketFromMessage, CheckTicketStatus
 internal/ports/       TicketDrafter, IssueTracker, AssigneeResolver interfaces
 internal/adapters/    telegram/ gemini/ jira/ config/ — one per external system
-internal/platform/    httpserver (Cloud Run entrypoint, /healthz), logging (JSON to stdout)
+internal/platform/    httpserver (Cloud Run entrypoint, /health), logging (JSON to stdout)
 configs/              assignees.yaml — the Assignee Mapping
 deploy/               the five deploy scripts + config.env.example
 docs/adr/             architecture decision records

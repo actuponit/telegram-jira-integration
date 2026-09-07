@@ -1,6 +1,6 @@
 # Assignee Mapping: telegram_username -> Jira account.
 # Hand-edited; redeploy the bot to pick up changes (see ADR-0001).
 #
-example_user:
-  jira_account_id: "5f8a1b2c3d4e5f6a7b8c9d0e"
-  display_name: "Example User"
+Isoazm:
+  jira_account_id: "712020:0c9a8776-5207-4fe5-bd22-6a3b2332ba25"
+  display_name: "Imran Moahmmed"

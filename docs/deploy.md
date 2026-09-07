@@ -34,7 +34,7 @@ $EDITOR deploy/config.env        # project, region, Jira coordinates, allowed ch
 ./deploy/10-secrets.sh     # create secrets (prompts, values read from stdin), grant accessor
 ./deploy/20-deploy.sh      # Cloud Build image + gcloud run deploy
 ./deploy/30-set-webhook.sh # point Telegram at the deployed URL with secret_token
-./deploy/40-verify.sh      # /healthz, getWebhookInfo, recent logs
+./deploy/40-verify.sh      # /health, getWebhookInfo, recent logs
 ```
 
 `deploy/config.env` is gitignored and holds no credentials.
@@ -79,7 +79,7 @@ Rotating `TELEGRAM_BOT_TOKEN` or `TELEGRAM_WEBHOOK_SECRET` also needs
 
 `./deploy/40-verify.sh` covers the automated checks:
 
-- `GET /healthz` returns 200 on the deployed URL.
+- `GET /health` returns 200 on the deployed URL.
 - `getWebhookInfo` points at `<service-url>/webhook/telegram`.
 - Recent Cloud Logging output for the service.
 
