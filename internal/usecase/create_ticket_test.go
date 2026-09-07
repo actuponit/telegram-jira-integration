@@ -27,6 +27,10 @@ type fakeTracker struct {
 	gotAssignee   domain.Assignee
 	gotAttachment *ports.Attachment
 	createCalled  bool
+
+	statusTicket domain.Ticket
+	statusErr    error
+	gotStatusKey string
 }
 
 func (f *fakeTracker) CreateIssue(ctx context.Context, draft domain.Draft, assignee domain.Assignee, attachment *ports.Attachment) (domain.Ticket, error) {
@@ -38,7 +42,8 @@ func (f *fakeTracker) CreateIssue(ctx context.Context, draft domain.Draft, assig
 }
 
 func (f *fakeTracker) GetIssueStatus(ctx context.Context, key string) (domain.Ticket, error) {
-	return domain.Ticket{}, errors.New("not implemented")
+	f.gotStatusKey = key
+	return f.statusTicket, f.statusErr
 }
 
 type fakeResolver struct {

@@ -115,3 +115,38 @@ func TestLoad_MalformedFile(t *testing.T) {
 		t.Fatalf("expected error for malformed file")
 	}
 }
+
+func TestParseChatAllowlist_SingleAndMultipleIDs(t *testing.T) {
+	allowlist, err := config.ParseChatAllowlist("-1001234567890")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !allowlist.Allows(-1001234567890) {
+		t.Error("parsed chat ID should be allowed")
+	}
+
+	allowlist, err = config.ParseChatAllowlist(" -1001234567890 , 42 ")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !allowlist.Allows(-1001234567890) || !allowlist.Allows(42) {
+		t.Error("both parsed chat IDs should be allowed")
+	}
+	if allowlist.Allows(43) {
+		t.Error("unlisted chat should not be allowed")
+	}
+}
+
+func TestParseChatAllowlist_RejectsEmptyList(t *testing.T) {
+	for _, raw := range []string{"", "   ", ",", " , "} {
+		if _, err := config.ParseChatAllowlist(raw); err == nil {
+			t.Errorf("ParseChatAllowlist(%q): want error, got nil", raw)
+		}
+	}
+}
+
+func TestParseChatAllowlist_RejectsNonNumericEntry(t *testing.T) {
+	if _, err := config.ParseChatAllowlist("-100123,not-a-chat-id"); err == nil {
+		t.Fatal("want error for non-numeric chat ID, got nil")
+	}
+}

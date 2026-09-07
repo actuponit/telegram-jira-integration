@@ -4,7 +4,7 @@
 
 **Blocked by:** 01 — Project scaffold
 
-**Status:** tracking — split into child tickets 06–10 (see Comments). This file now tracks the whole flow; the checklist below is checked off as child tickets land.
+**Status:** done — split into child tickets 06–10 (see Comments), all of which have landed.
 
 - [x] `internal/usecase.CreateTicketFromMessage` orchestrates the flow against `ports.TicketDrafter`/`ports.IssueTracker`/`ports.AssigneeResolver` — tested against in-memory fakes, no live network calls (`internal/usecase/create_ticket_test.go`)
 - [x] Empty `@assignee` → Issue created unassigned (no `assignee` key sent to Jira, never `null`) — decided in the usecase, enforced by the `jira` adapter (08)
@@ -13,17 +13,17 @@
 - [x] Reporter attribution ("reported via Telegram by X") composed into the Draft description by the usecase, not the jira adapter (keeps ADF-building in the adapter free of business logic)
 - [x] Image attachment (`*ports.Attachment`) passed through the usecase to `IssueTracker.CreateIssue` untouched
 - [x] Video URL linked into the Draft description by the usecase, never downloaded
-- [ ] Telegram webhook handler verifies the `secret_token` on every incoming request — ticket 09
-- [ ] `/to-ticket` with no reply target gets a usage-hint response — ticket 09
-- [ ] Source message + its own reply chain gathered, each tagged with sender name and timestamp — ticket 09
-- [ ] `gemini` adapter implements `TicketDrafter` via `google.golang.org/genai` — ticket 07
-- [ ] `config` adapter implements `AssigneeResolver`, loading `configs/assignees.yaml` — ticket 06
-- [ ] `jira` adapter implements `IssueTracker`, hand-rolled `net/http`, ADF description, Sprint field, `createmeta` startup validation — ticket 08
-- [ ] Image downloaded via Telegram `getFile`; video URL extracted (not downloaded) — ticket 09
-- [ ] Chat reply on success (`Created <KEY>: ...`) and on Gemini/Jira failure — ticket 09
-- [ ] Every attempt logged with Telegram message ID, chat ID, stage-of-failure — ticket 09
-- [ ] `gemini` and `jira` adapters have thin contract tests against recorded fixtures — tickets 07, 08
-- [ ] `cmd/bot/main.go` wiring + startup `createmeta` validation — ticket 10
+- [x] Telegram webhook handler verifies the `secret_token` on every incoming request — ticket 09
+- [x] `/to-ticket` with no reply target gets a usage-hint response — ticket 09
+- [x] Source message + its own reply chain gathered, each tagged with sender name and timestamp — ticket 09
+- [x] `gemini` adapter implements `TicketDrafter` via `google.golang.org/genai` — ticket 07
+- [x] `config` adapter implements `AssigneeResolver`, loading `configs/assignees.yaml` — ticket 06
+- [x] `jira` adapter implements `IssueTracker`, hand-rolled `net/http`, ADF description, Sprint field, `createmeta` startup validation — ticket 08
+- [x] Image downloaded via Telegram `getFile`; video URL extracted (not downloaded) — ticket 09
+- [x] Chat reply on success (`Created <KEY>: ...`) and on Gemini/Jira failure — ticket 09
+- [x] Every attempt logged with Telegram message ID, chat ID, stage-of-failure — ticket 09
+- [x] `gemini` and `jira` adapters have thin contract tests against recorded fixtures — tickets 07, 08
+- [x] `cmd/bot/main.go` wiring + startup `createmeta` validation — ticket 10
 
 ## Comments
 

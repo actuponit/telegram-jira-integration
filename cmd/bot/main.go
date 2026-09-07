@@ -43,6 +43,11 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("load assignee mapping: %w", err)
 	}
 
+	allowlist, err := config.ParseChatAllowlist(secrets.allowedChatIDs)
+	if err != nil {
+		return fmt.Errorf("parse chat allowlist: %w", err)
+	}
+
 	drafter, err := gemini.New(ctx, secrets.geminiAPIKey)
 	if err != nil {
 		return fmt.Errorf("create gemini adapter: %w", err)
@@ -53,7 +58,7 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("validate jira config: %w", err)
 	}
 
-	webhook, err := telegram.New(secrets.telegramBotToken, secrets.telegramWebhookSecret, drafter, tracker, resolver, logger)
+	webhook, err := telegram.New(secrets.telegramBotToken, secrets.telegramWebhookSecret, allowlist, drafter, tracker, resolver, logger)
 	if err != nil {
 		return fmt.Errorf("create telegram adapter: %w", err)
 	}
@@ -88,6 +93,11 @@ type secrets struct {
 	jiraProjectKey        string
 	telegramBotToken      string
 	telegramWebhookSecret string
+
+	// allowedChatIDs is the comma-separated chat allowlist. Not a secret,
+	// but read the same way so a missing value fails startup rather than
+	// silently defaulting to "answer nobody".
+	allowedChatIDs string
 }
 
 // loadSecrets reads every required env var, collecting every missing one
@@ -103,6 +113,7 @@ func loadSecrets() (secrets, error) {
 		"JIRA_PROJECT_KEY":        &s.jiraProjectKey,
 		"TELEGRAM_BOT_TOKEN":      &s.telegramBotToken,
 		"TELEGRAM_WEBHOOK_SECRET": &s.telegramWebhookSecret,
+		"TELEGRAM_ALLOWED_CHATS":  &s.allowedChatIDs,
 	}
 
 	var missing []string

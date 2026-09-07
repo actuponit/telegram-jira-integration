@@ -1,0 +1,12 @@
+.git
+.github
+.scratch
+.claude
+.vscode
+docs
+deploy
+*.md
+Dockerfile
+.dockerignore
+.env
+.env.*

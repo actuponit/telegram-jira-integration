@@ -1,0 +1,9 @@
+# Local deploy coordinates — copy of deploy/config.env.example.
+deploy/config.env
+
+# Local secrets for running the bot outside Cloud Run.
+.env
+.env.*
+
+# Build output.
+/bot

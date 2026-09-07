@@ -20,14 +20,17 @@ import (
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 
+	"github.com/actuponit/telegram-jira-integration/internal/domain"
 	"github.com/actuponit/telegram-jira-integration/internal/ports"
 	"github.com/actuponit/telegram-jira-integration/internal/usecase"
 )
 
 const (
-	command          = "/to-ticket"
+	commandToTicket  = "/to-ticket"
+	commandStatus    = "/status"
 	secretHeaderName = "X-Telegram-Bot-Api-Secret-Token"
 	usageHint        = "Usage: reply to the message you want turned into a ticket with /to-ticket [@assignee]"
+	statusUsageHint  = "Usage: reply /status to one of my \"Created <KEY>: ...\" confirmation messages."
 
 	// ticketProcessingTimeout bounds the whole asynchronous ticket flow,
 	// including Telegram media download, Gemini, and Jira. It must outlive the
@@ -35,6 +38,10 @@ const (
 	// redeliver an update when the response is delayed.
 	ticketProcessingTimeout = 2 * time.Minute
 	telegramRequestTimeout  = 30 * time.Second
+
+	// statusLookupTimeout bounds a /status lookup, which is a single Jira
+	// read rather than the full drafting flow.
+	statusLookupTimeout = 30 * time.Second
 )
 
 // sender is the subset of *tgbotapi.BotAPI this adapter uses to reply into
@@ -56,6 +63,8 @@ type Handler struct {
 	send        sender
 	files       fileDownloader
 	secretToken string
+	allowlist   domain.ChatAllowlist
+	botID       int64
 	drafter     ports.TicketDrafter
 	tracker     ports.IssueTracker
 	resolver    ports.AssigneeResolver
@@ -63,20 +72,25 @@ type Handler struct {
 }
 
 // New creates a Handler backed by a real Telegram bot client.
-func New(botToken, secretToken string, drafter ports.TicketDrafter, tracker ports.IssueTracker, resolver ports.AssigneeResolver, logger *slog.Logger) (*Handler, error) {
+func New(botToken, secretToken string, allowlist domain.ChatAllowlist, drafter ports.TicketDrafter, tracker ports.IssueTracker, resolver ports.AssigneeResolver, logger *slog.Logger) (*Handler, error) {
 	httpClient := &http.Client{Timeout: telegramRequestTimeout}
 	bot, err := tgbotapi.NewBotAPIWithClient(botToken, tgbotapi.APIEndpoint, httpClient)
 	if err != nil {
 		return nil, fmt.Errorf("telegram: create bot client: %w", err)
 	}
-	return newHandler(bot, botFileDownloader{bot: bot, httpClient: httpClient}, secretToken, drafter, tracker, resolver, logger), nil
+	h := newHandler(bot, botFileDownloader{bot: bot, httpClient: httpClient}, secretToken, allowlist, drafter, tracker, resolver, logger)
+	// Self is populated by the getMe call NewBotAPIWithClient makes; /status
+	// uses it to tell the bot's own confirmation messages from a user's.
+	h.botID = bot.Self.ID
+	return h, nil
 }
 
-func newHandler(send sender, files fileDownloader, secretToken string, drafter ports.TicketDrafter, tracker ports.IssueTracker, resolver ports.AssigneeResolver, logger *slog.Logger) *Handler {
+func newHandler(send sender, files fileDownloader, secretToken string, allowlist domain.ChatAllowlist, drafter ports.TicketDrafter, tracker ports.IssueTracker, resolver ports.AssigneeResolver, logger *slog.Logger) *Handler {
 	return &Handler{
 		send:        send,
 		files:       files,
 		secretToken: secretToken,
+		allowlist:   allowlist,
 		drafter:     drafter,
 		tracker:     tracker,
 		resolver:    resolver,
@@ -131,13 +145,87 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if update.Message == nil {
 		return
 	}
-	if _, isTicketCommand := parseToTicketCommand(update.Message.Text); !isTicketCommand {
+	message := update.Message
+
+	command := commandName(message.Text)
+	if command != commandToTicket && command != commandStatus {
+		return
+	}
+
+	// Chat-level allowlist: a command from anywhere else gets no reply and no
+	// side effects, but is still logged so an unexpected chat ID is
+	// diagnosable rather than invisible.
+	if !h.allowlist.Allows(message.Chat.ID) {
+		h.logger.Info("command from non-allowlisted chat ignored",
+			"telegram_message_id", message.MessageID,
+			"chat_id", message.Chat.ID,
+			"command", command,
+		)
 		return
 	}
 
 	// Acknowledge before making any outbound calls. The work must not inherit
 	// r.Context(): it is canceled when this webhook request ends.
-	go h.processTicket(update.Message)
+	switch command {
+	case commandToTicket:
+		go h.processTicket(message)
+	case commandStatus:
+		go h.processStatus(message)
+	}
+}
+
+// processStatus answers a /status command sent as a reply to one of the
+// bot's own "Created <KEY>: ..." confirmation messages.
+func (h *Handler) processStatus(message *tgbotapi.Message) {
+	ctx, cancel := context.WithTimeout(context.Background(), statusLookupTimeout)
+	defer cancel()
+
+	logAttrs := []any{"telegram_message_id", message.MessageID, "chat_id", message.Chat.ID}
+
+	key, ok := h.confirmationKey(message.ReplyToMessage)
+	if !ok {
+		h.logger.Info("status: reply target is not a bot confirmation message", append(logAttrs, "stage", "parse")...)
+		h.reply(message, statusUsageHint)
+		return
+	}
+
+	ticket, err := usecase.CheckTicketStatus(ctx, h.tracker, key)
+	if err != nil {
+		h.logger.Error("status: lookup failed", append(logAttrs, "stage", "jira", "issue_key", key, "error", err.Error())...)
+		h.reply(message, fmt.Sprintf("Couldn't look up %s: %s", key, err))
+		return
+	}
+
+	h.logger.Info("status: looked up issue", append(logAttrs, "stage", "success", "issue_key", ticket.Key)...)
+	h.reply(message, renderStatus(ticket))
+}
+
+// confirmationKey extracts the Issue key from source only when source is
+// one of this bot's own confirmation messages. A user can type text that
+// looks like a confirmation, so the sender is checked too.
+func (h *Handler) confirmationKey(source *tgbotapi.Message) (string, bool) {
+	if source == nil || source.From == nil || source.From.ID != h.botID {
+		return "", false
+	}
+	return ParseTicketKey(messageText(source))
+}
+
+// renderStatus is the chat rendering of a looked-up Ticket.
+func renderStatus(ticket domain.Ticket) string {
+	return fmt.Sprintf("%s — %s\nAssignee: %s\n%s", ticket.Key, ticket.Status, assigneeLabel(ticket.Assignee), ticket.URL)
+}
+
+// assigneeLabel renders a Ticket's assignee for chat, falling back to the
+// account ID when Jira returns an assigned account with no display name.
+func assigneeLabel(assignee domain.Assignee) string {
+	switch {
+	case assignee.IsUnassigned():
+		return "Unassigned"
+	case assignee.DisplayName == "":
+		return assignee.AccountID
+	default:
+		return assignee.DisplayName
+	}
 }
 
 func (h *Handler) processTicket(message *tgbotapi.Message) {
@@ -220,18 +308,29 @@ func classifyCreateTicketError(err error) (stage, chatMessage string) {
 // (optionally addressed to this bot, e.g. "/to-ticket@MyBot"), and returns
 // its optional @assignee argument, empty when omitted.
 func parseToTicketCommand(text string) (assignee string, ok bool) {
+	if commandName(text) != commandToTicket {
+		return "", false
+	}
 	fields := strings.Fields(text)
-	if len(fields) == 0 {
-		return "", false
-	}
-	name, _, _ := strings.Cut(fields[0], "@")
-	if !strings.EqualFold(name, command) {
-		return "", false
-	}
 	if len(fields) > 1 && strings.HasPrefix(fields[1], "@") {
 		return fields[1], true
 	}
 	return "", true
+}
+
+// commandName returns the bare, lowercased command word of text, stripping
+// any "@BotName" suffix Telegram appends in groups ("/to-ticket@MyBot foo"
+// -> "/to-ticket"). It returns "" when text does not start with a command.
+func commandName(text string) string {
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return ""
+	}
+	name, _, _ := strings.Cut(fields[0], "@")
+	if !strings.HasPrefix(name, "/") {
+		return ""
+	}
+	return strings.ToLower(name)
 }
 
 // gatherContext walks source's own reply chain and returns it as

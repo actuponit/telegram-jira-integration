@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,6 +18,13 @@ import (
 	"github.com/actuponit/telegram-jira-integration/internal/domain"
 	"github.com/actuponit/telegram-jira-integration/internal/ports"
 	"github.com/actuponit/telegram-jira-integration/internal/usecase"
+)
+
+// allowedChatID is the chat every handler in these tests is allowlisted
+// for; botID is the identity the handler treats as its own.
+const (
+	allowedChatID int64 = 42
+	botID         int64 = 7
 )
 
 // --- fakes ---
@@ -80,6 +88,10 @@ func (f fakeDrafter) Draft(ctx context.Context, messages []ports.Message) (domai
 type fakeTracker struct {
 	ticket domain.Ticket
 	err    error
+
+	statusTicket domain.Ticket
+	statusErr    error
+	gotStatusKey *string
 }
 
 func (f fakeTracker) CreateIssue(ctx context.Context, draft domain.Draft, assignee domain.Assignee, attachment *ports.Attachment) (domain.Ticket, error) {
@@ -87,7 +99,10 @@ func (f fakeTracker) CreateIssue(ctx context.Context, draft domain.Draft, assign
 }
 
 func (f fakeTracker) GetIssueStatus(ctx context.Context, key string) (domain.Ticket, error) {
-	return domain.Ticket{}, nil
+	if f.gotStatusKey != nil {
+		*f.gotStatusKey = key
+	}
+	return f.statusTicket, f.statusErr
 }
 
 type fakeResolver struct {
@@ -301,7 +316,7 @@ func testLogger() *slog.Logger {
 
 func TestServeHTTP_RejectsMissingOrWrongSecretToken(t *testing.T) {
 	send := &fakeSender{}
-	h := newHandler(send, &fakeFiles{}, "correct-secret", fakeDrafter{}, fakeTracker{}, fakeResolver{}, testLogger())
+	h := newHandler(send, &fakeFiles{}, "correct-secret", domain.NewChatAllowlist(allowedChatID), fakeDrafter{}, fakeTracker{}, fakeResolver{}, testLogger())
 
 	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader([]byte("{}")))
 	req.Header.Set(secretHeaderName, "wrong-secret")
@@ -321,10 +336,10 @@ func TestServeHTTP_AcknowledgesBeforeTicketWorkWithDetachedContext(t *testing.T)
 	started := make(chan context.Context)
 	release := make(chan struct{})
 	send := &fakeSender{done: make(chan struct{})}
-	h := newHandler(send, &fakeFiles{}, "secret", blockingDrafter{started: started, release: release}, fakeTracker{ticket: domain.Ticket{Key: "MA-1"}}, fakeResolver{}, testLogger())
+	h := newHandler(send, &fakeFiles{}, "secret", domain.NewChatAllowlist(allowedChatID), blockingDrafter{started: started, release: release}, fakeTracker{ticket: domain.Ticket{Key: "MA-1"}}, fakeResolver{}, testLogger())
 
 	update := tgbotapi.Update{Message: &tgbotapi.Message{
-		Chat: &tgbotapi.Chat{ID: 42}, Text: "/to-ticket",
+		Chat: &tgbotapi.Chat{ID: allowedChatID}, Text: "/to-ticket",
 		ReplyToMessage: &tgbotapi.Message{From: &tgbotapi.User{UserName: "alice"}, Text: "it broke"},
 	}}
 	requestContext, cancelRequest := context.WithCancel(context.Background())
@@ -357,11 +372,11 @@ func TestServeHTTP_AcknowledgesBeforeTicketWorkWithDetachedContext(t *testing.T)
 
 func TestServeHTTP_NoReplyTargetSendsUsageHint(t *testing.T) {
 	send := &fakeSender{}
-	h := newHandler(send, &fakeFiles{}, "secret", fakeDrafter{}, fakeTracker{}, fakeResolver{}, testLogger())
+	h := newHandler(send, &fakeFiles{}, "secret", domain.NewChatAllowlist(allowedChatID), fakeDrafter{}, fakeTracker{}, fakeResolver{}, testLogger())
 
 	update := tgbotapi.Update{Message: &tgbotapi.Message{
 		MessageID: 1,
-		Chat:      &tgbotapi.Chat{ID: 42},
+		Chat:      &tgbotapi.Chat{ID: allowedChatID},
 		Text:      "/to-ticket",
 	}}
 	h.processTicket(update.Message)
@@ -374,11 +389,11 @@ func TestServeHTTP_SuccessRepliesWithCreatedMessage(t *testing.T) {
 	send := &fakeSender{}
 	tracker := fakeTracker{ticket: domain.Ticket{Key: "MA-1", URL: "https://jira.example/browse/MA-1"}}
 	drafter := fakeDrafter{draft: domain.Draft{Title: "Export crashes"}}
-	h := newHandler(send, &fakeFiles{}, "secret", drafter, tracker, fakeResolver{}, testLogger())
+	h := newHandler(send, &fakeFiles{}, "secret", domain.NewChatAllowlist(allowedChatID), drafter, tracker, fakeResolver{}, testLogger())
 
 	update := tgbotapi.Update{Message: &tgbotapi.Message{
 		MessageID: 2,
-		Chat:      &tgbotapi.Chat{ID: 42},
+		Chat:      &tgbotapi.Chat{ID: allowedChatID},
 		Text:      "/to-ticket",
 		ReplyToMessage: &tgbotapi.Message{
 			From: &tgbotapi.User{UserName: "alice"},
@@ -401,10 +416,10 @@ func TestServeHTTP_UnresolvedAssigneeNotedInReply(t *testing.T) {
 	send := &fakeSender{}
 	tracker := fakeTracker{ticket: domain.Ticket{Key: "MA-2", URL: "https://jira.example/browse/MA-2"}}
 	resolver := fakeResolver{ok: false}
-	h := newHandler(send, &fakeFiles{}, "secret", fakeDrafter{}, tracker, resolver, testLogger())
+	h := newHandler(send, &fakeFiles{}, "secret", domain.NewChatAllowlist(allowedChatID), fakeDrafter{}, tracker, resolver, testLogger())
 
 	update := tgbotapi.Update{Message: &tgbotapi.Message{
-		Chat: &tgbotapi.Chat{ID: 42},
+		Chat: &tgbotapi.Chat{ID: allowedChatID},
 		Text: "/to-ticket @nobody",
 		ReplyToMessage: &tgbotapi.Message{
 			From: &tgbotapi.User{UserName: "alice"},
@@ -424,10 +439,10 @@ func TestServeHTTP_UnresolvedAssigneeNotedInReply(t *testing.T) {
 func TestServeHTTP_GeminiFailureRepliesWithClearError(t *testing.T) {
 	send := &fakeSender{}
 	drafter := fakeDrafter{err: errors.New("timeout")}
-	h := newHandler(send, &fakeFiles{}, "secret", drafter, fakeTracker{}, fakeResolver{}, testLogger())
+	h := newHandler(send, &fakeFiles{}, "secret", domain.NewChatAllowlist(allowedChatID), drafter, fakeTracker{}, fakeResolver{}, testLogger())
 
 	update := tgbotapi.Update{Message: &tgbotapi.Message{
-		Chat:           &tgbotapi.Chat{ID: 42},
+		Chat:           &tgbotapi.Chat{ID: allowedChatID},
 		Text:           "/to-ticket",
 		ReplyToMessage: &tgbotapi.Message{From: &tgbotapi.User{UserName: "alice"}, Text: "it broke"},
 	}}
@@ -441,10 +456,10 @@ func TestServeHTTP_GeminiFailureRepliesWithClearError(t *testing.T) {
 func TestServeHTTP_JiraFailureSurfacesErrorMessages(t *testing.T) {
 	send := &fakeSender{}
 	tracker := fakeTracker{err: errors.New("jira: create issue failed (400): issuetype is required")}
-	h := newHandler(send, &fakeFiles{}, "secret", fakeDrafter{}, tracker, fakeResolver{}, testLogger())
+	h := newHandler(send, &fakeFiles{}, "secret", domain.NewChatAllowlist(allowedChatID), fakeDrafter{}, tracker, fakeResolver{}, testLogger())
 
 	update := tgbotapi.Update{Message: &tgbotapi.Message{
-		Chat:           &tgbotapi.Chat{ID: 42},
+		Chat:           &tgbotapi.Chat{ID: allowedChatID},
 		Text:           "/to-ticket",
 		ReplyToMessage: &tgbotapi.Message{From: &tgbotapi.User{UserName: "alice"}, Text: "it broke"},
 	}}
@@ -457,9 +472,9 @@ func TestServeHTTP_JiraFailureSurfacesErrorMessages(t *testing.T) {
 
 func TestServeHTTP_IgnoresNonTicketCommands(t *testing.T) {
 	send := &fakeSender{}
-	h := newHandler(send, &fakeFiles{}, "secret", fakeDrafter{}, fakeTracker{}, fakeResolver{}, testLogger())
+	h := newHandler(send, &fakeFiles{}, "secret", domain.NewChatAllowlist(allowedChatID), fakeDrafter{}, fakeTracker{}, fakeResolver{}, testLogger())
 
-	update := tgbotapi.Update{Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: 42}, Text: "just chatting"}}
+	update := tgbotapi.Update{Message: &tgbotapi.Message{Chat: &tgbotapi.Chat{ID: allowedChatID}, Text: "just chatting"}}
 	req := httptest.NewRequest(http.MethodPost, "/webhook", newUpdateBody(t, update))
 	req.Header.Set(secretHeaderName, "secret")
 	rec := httptest.NewRecorder()
@@ -471,5 +486,193 @@ func TestServeHTTP_IgnoresNonTicketCommands(t *testing.T) {
 	}
 	if len(send.sent) != 0 {
 		t.Fatalf("sent = %+v, want no reply for a non-command message", send.sent)
+	}
+}
+
+// --- chat allowlist ---
+
+func newAllowlistedHandler(send *fakeSender, tracker fakeTracker) *Handler {
+	h := newHandler(send, &fakeFiles{}, "secret", domain.NewChatAllowlist(allowedChatID), fakeDrafter{}, tracker, fakeResolver{}, testLogger())
+	h.botID = botID
+	return h
+}
+
+func serveUpdate(t *testing.T, h *Handler, update tgbotapi.Update) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/webhook", newUpdateBody(t, update))
+	req.Header.Set(secretHeaderName, "secret")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestServeHTTP_CommandsFromNonAllowlistedChatHaveNoEffect(t *testing.T) {
+	for _, text := range []string{"/to-ticket", "/to-ticket @alice", "/status"} {
+		send := &fakeSender{}
+		tracker := fakeTracker{ticket: domain.Ticket{Key: "MA-1"}}
+		h := newAllowlistedHandler(send, tracker)
+
+		update := tgbotapi.Update{Message: &tgbotapi.Message{
+			MessageID:      9,
+			Chat:           &tgbotapi.Chat{ID: allowedChatID + 1},
+			Text:           text,
+			ReplyToMessage: &tgbotapi.Message{From: &tgbotapi.User{ID: botID}, Text: "Created MA-1: x — u"},
+		}}
+		rec := serveUpdate(t, h, update)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%q: status = %d, want 200", text, rec.Code)
+		}
+		// The command is dispatched to a goroutine when allowed, so give a
+		// wrongly-allowed command a chance to reply before asserting silence.
+		time.Sleep(50 * time.Millisecond)
+		if len(send.sent) != 0 {
+			t.Fatalf("%q from a non-allowlisted chat: sent = %+v, want no reply", text, send.sent)
+		}
+	}
+}
+
+func TestServeHTTP_IgnoredChatIsStillLoggedWithChatID(t *testing.T) {
+	var logs bytes.Buffer
+	h := newHandler(&fakeSender{}, &fakeFiles{}, "secret", domain.NewChatAllowlist(allowedChatID),
+		fakeDrafter{}, fakeTracker{}, fakeResolver{}, slog.New(slog.NewTextHandler(&logs, nil)))
+
+	serveUpdate(t, h, tgbotapi.Update{Message: &tgbotapi.Message{
+		MessageID: 9,
+		Chat:      &tgbotapi.Chat{ID: 999},
+		Text:      "/to-ticket",
+	}})
+
+	logged := logs.String()
+	if !strings.Contains(logged, "chat_id=999") {
+		t.Fatalf("logs = %q, want the ignored chat ID recorded", logged)
+	}
+}
+
+func TestServeHTTP_AllowlistedChatIsProcessed(t *testing.T) {
+	send := &fakeSender{}
+	h := newAllowlistedHandler(send, fakeTracker{ticket: domain.Ticket{Key: "MA-1"}})
+
+	h.processTicket(&tgbotapi.Message{
+		MessageID:      1,
+		Chat:           &tgbotapi.Chat{ID: allowedChatID},
+		Text:           "/to-ticket",
+		ReplyToMessage: &tgbotapi.Message{From: &tgbotapi.User{UserName: "alice"}, Text: "it broke"},
+	})
+
+	if len(send.sent) != 1 {
+		t.Fatalf("sent = %+v, want the allowlisted chat's command answered", send.sent)
+	}
+}
+
+// --- /status ---
+
+func statusCommand(reply *tgbotapi.Message) *tgbotapi.Message {
+	return &tgbotapi.Message{
+		MessageID:      5,
+		Chat:           &tgbotapi.Chat{ID: allowedChatID},
+		Text:           "/status",
+		ReplyToMessage: reply,
+	}
+}
+
+func botConfirmation(text string) *tgbotapi.Message {
+	return &tgbotapi.Message{From: &tgbotapi.User{ID: botID}, Text: text}
+}
+
+func TestProcessStatus_RepliesWithAssigneeAndStatus(t *testing.T) {
+	send := &fakeSender{}
+	var gotKey string
+	h := newAllowlistedHandler(send, fakeTracker{
+		gotStatusKey: &gotKey,
+		statusTicket: domain.Ticket{
+			Key:      "MA-1",
+			URL:      "https://jira.example/browse/MA-1",
+			Status:   "In Progress",
+			Assignee: domain.Assignee{AccountID: "acct-1", DisplayName: "Ada Lovelace"},
+		},
+	})
+
+	h.processStatus(statusCommand(botConfirmation("Created MA-1: Export crashes — https://jira.example/browse/MA-1")))
+
+	if gotKey != "MA-1" {
+		t.Errorf("looked up key %q, want MA-1", gotKey)
+	}
+	if len(send.sent) != 1 {
+		t.Fatalf("sent = %+v, want a single reply", send.sent)
+	}
+	reply := send.sent[0].Text
+	if !strings.Contains(reply, "In Progress") || !strings.Contains(reply, "Ada Lovelace") {
+		t.Fatalf("reply = %q, want the workflow status and assignee display name", reply)
+	}
+}
+
+func TestProcessStatus_UnassignedIssueRendersUnassigned(t *testing.T) {
+	send := &fakeSender{}
+	h := newAllowlistedHandler(send, fakeTracker{statusTicket: domain.Ticket{Key: "MA-1", Status: "To Do"}})
+
+	h.processStatus(statusCommand(botConfirmation("Created MA-1: Export crashes — u")))
+
+	if len(send.sent) != 1 || !strings.Contains(send.sent[0].Text, "Unassigned") {
+		t.Fatalf("sent = %+v, want the reply to say Unassigned", send.sent)
+	}
+}
+
+func TestProcessStatus_RejectsReplyToNonConfirmationMessage(t *testing.T) {
+	cases := map[string]*tgbotapi.Message{
+		"no reply target":              nil,
+		"bot message without a key":    botConfirmation("here you go"),
+		"user impersonating the reply": {From: &tgbotapi.User{ID: botID + 1}, Text: "Created MA-1: fake — u"},
+	}
+
+	for name, reply := range cases {
+		send := &fakeSender{}
+		var gotKey string
+		h := newAllowlistedHandler(send, fakeTracker{gotStatusKey: &gotKey})
+
+		h.processStatus(statusCommand(reply))
+
+		if gotKey != "" {
+			t.Errorf("%s: tracker was called with %q, want no lookup", name, gotKey)
+		}
+		if len(send.sent) != 1 || send.sent[0].Text != statusUsageHint {
+			t.Errorf("%s: sent = %+v, want a clear usage hint rather than silence", name, send.sent)
+		}
+	}
+}
+
+func TestProcessStatus_InaccessibleIssueRepliesWithClearError(t *testing.T) {
+	send := &fakeSender{}
+	h := newAllowlistedHandler(send, fakeTracker{statusErr: errors.New("jira: issue MA-1 not found")})
+
+	h.processStatus(statusCommand(botConfirmation("Created MA-1: gone — u")))
+
+	if len(send.sent) != 1 || !strings.Contains(send.sent[0].Text, "not found") {
+		t.Fatalf("sent = %+v, want Jira's own message surfaced", send.sent)
+	}
+}
+
+func TestRenderStatus_AssigneeLabelFallsBackToAccountID(t *testing.T) {
+	if got := assigneeLabel(domain.Assignee{}); got != "Unassigned" {
+		t.Errorf("assigneeLabel(zero) = %q, want Unassigned", got)
+	}
+	if got := assigneeLabel(domain.Assignee{AccountID: "acct-1"}); got != "acct-1" {
+		t.Errorf("assigneeLabel(no display name) = %q, want the account ID", got)
+	}
+}
+
+func TestCommandName(t *testing.T) {
+	cases := map[string]string{
+		"/to-ticket":            commandToTicket,
+		"/to-ticket@MyBot @bob": commandToTicket,
+		"/STATUS":               commandStatus,
+		"/status@MyBot":         commandStatus,
+		"just chatting":         "",
+		"":                      "",
+	}
+	for text, want := range cases {
+		if got := commandName(text); got != want {
+			t.Errorf("commandName(%q) = %q, want %q", text, got, want)
+		}
 	}
 }
