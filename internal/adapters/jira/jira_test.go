@@ -277,14 +277,25 @@ func TestGetIssueStatus_ParsesTicket(t *testing.T) {
 	}
 }
 
-func TestValidateStartup_ResolvesSprintFieldOverHTTP(t *testing.T) {
+func TestValidateStartup_ResolvesSprintFieldAndIDOverHTTP(t *testing.T) {
 	fixture, err := os.ReadFile("testdata/createmeta.json")
 	if err != nil {
 		t.Fatalf("read fixture: %v", err)
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(fixture)
+		switch {
+		case r.URL.Path == "/rest/api/3/issue/createmeta":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(fixture)
+		case r.URL.Path == "/rest/agile/1.0/board":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"isLast":true,"values":[{"id":7}]}`))
+		case r.URL.Path == "/rest/agile/1.0/board/7/sprint":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"isLast":true,"values":[{"id":42,"name":"MA Sprint Board 4"}]}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
 	}))
 	defer server.Close()
 
@@ -294,5 +305,36 @@ func TestValidateStartup_ResolvesSprintFieldOverHTTP(t *testing.T) {
 	}
 	if tracker.sprintFieldID != "customfield_10020" {
 		t.Fatalf("sprintFieldID = %q, want customfield_10020", tracker.sprintFieldID)
+	}
+	if tracker.sprintID != 42 {
+		t.Fatalf("sprintID = %d, want 42", tracker.sprintID)
+	}
+}
+
+func TestValidateStartup_NoBoardHasSprintFails(t *testing.T) {
+	fixture, err := os.ReadFile("testdata/createmeta.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/rest/api/3/issue/createmeta":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(fixture)
+		case r.URL.Path == "/rest/agile/1.0/board":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"isLast":true,"values":[{"id":7}]}`))
+		case r.URL.Path == "/rest/agile/1.0/board/7/sprint":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"isLast":true,"values":[{"id":99,"name":"Some Other Sprint"}]}`))
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	tracker := New(server.URL, "bot@example.com", "token", "MA")
+	if err := tracker.ValidateStartup(context.Background()); err == nil {
+		t.Fatal("expected error when no board has the fixed Sprint, got nil")
 	}
 }

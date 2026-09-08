@@ -35,6 +35,10 @@ type Tracker struct {
 	// sprintFieldID is the custom field id for "Sprint", resolved by
 	// ValidateStartup before any Issue is created.
 	sprintFieldID string
+
+	// sprintID is the numeric id of the fixed Sprint every created Issue is
+	// placed on, resolved by ValidateStartup via the Agile API.
+	sprintID int
 }
 
 // New creates a Tracker against the given Jira site.
@@ -94,8 +98,8 @@ func (t *Tracker) CreateIssue(ctx context.Context, draft domain.Draft, assignee 
 	if !assignee.IsUnassigned() {
 		fields["assignee"] = map[string]any{"accountId": assignee.AccountID}
 	}
-	if t.sprintFieldID != "" {
-		fields[t.sprintFieldID] = sprintName
+	if t.sprintFieldID != "" && t.sprintID != 0 {
+		fields[t.sprintFieldID] = t.sprintID
 	}
 
 	body, err := json.Marshal(createIssueRequest{Fields: fields})
@@ -312,6 +316,109 @@ func (t *Tracker) ValidateStartup(ctx context.Context) error {
 		return err
 	}
 	t.sprintFieldID = sprintFieldID
+
+	sprintID, err := t.resolveSprintID(ctx)
+	if err != nil {
+		return err
+	}
+	t.sprintID = sprintID
+	return nil
+}
+
+type agileBoardResponse struct {
+	IsLast bool `json:"isLast"`
+	Values []struct {
+		ID int `json:"id"`
+	} `json:"values"`
+}
+
+type agileSprintResponse struct {
+	IsLast bool `json:"isLast"`
+	Values []struct {
+		ID   int    `json:"id"`
+		Name string `json:"name"`
+	} `json:"values"`
+}
+
+// resolveSprintID finds the numeric id of sprintName across every board for
+// this Tracker's project, by walking the Jira Agile API. The Sprint custom
+// field only accepts a sprint id on issue creation, not its name.
+func (t *Tracker) resolveSprintID(ctx context.Context) (int, error) {
+	startAt := 0
+	for {
+		url := fmt.Sprintf("%s/rest/agile/1.0/board?projectKeyOrId=%s&startAt=%d", t.baseURL, t.projectKey, startAt)
+		var boards agileBoardResponse
+		if err := t.getAgile(ctx, url, &boards); err != nil {
+			return 0, fmt.Errorf("jira: list boards for project %q: %w", t.projectKey, err)
+		}
+
+		for _, board := range boards.Values {
+			id, found, err := t.findSprintOnBoard(ctx, board.ID, sprintName)
+			if err != nil {
+				return 0, err
+			}
+			if found {
+				return id, nil
+			}
+		}
+
+		if boards.IsLast || len(boards.Values) == 0 {
+			break
+		}
+		startAt += len(boards.Values)
+	}
+
+	return 0, fmt.Errorf("jira: no board for project %q has a sprint named %q", t.projectKey, sprintName)
+}
+
+func (t *Tracker) findSprintOnBoard(ctx context.Context, boardID int, name string) (int, bool, error) {
+	startAt := 0
+	for {
+		url := fmt.Sprintf("%s/rest/agile/1.0/board/%d/sprint?state=active,future,closed&startAt=%d", t.baseURL, boardID, startAt)
+		var sprints agileSprintResponse
+		if err := t.getAgile(ctx, url, &sprints); err != nil {
+			// A board without a sprint backlog (e.g. a kanban board)
+			// returns 400; skip it rather than failing startup.
+			return 0, false, nil
+		}
+
+		for _, sprint := range sprints.Values {
+			if sprint.Name == name {
+				return sprint.ID, true, nil
+			}
+		}
+
+		if sprints.IsLast || len(sprints.Values) == 0 {
+			return 0, false, nil
+		}
+		startAt += len(sprints.Values)
+	}
+}
+
+func (t *Tracker) getAgile(ctx context.Context, url string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Authorization", t.authHeader())
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := t.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("do request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("request failed (%d): %s", resp.StatusCode, decodeJiraError(respBody))
+	}
+	if err := json.Unmarshal(respBody, out); err != nil {
+		return fmt.Errorf("parse response: %w", err)
+	}
 	return nil
 }
 
