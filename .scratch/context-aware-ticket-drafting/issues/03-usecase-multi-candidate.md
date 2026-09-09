@@ -6,7 +6,7 @@ independently, and at most one clarification request can come back.
 
 **Blocked by:** 01 — Domain & ports
 
-**Status:** open
+**Status:** done
 
 ## Scope
 

@@ -321,12 +321,33 @@ func (h *Handler) processTicket(message *tgbotapi.Message) {
 		return
 	}
 
-	reply := fmt.Sprintf("Created %s: %s — %s", result.Ticket.Key, result.Title, result.Ticket.URL)
-	if result.AssigneeUnresolved {
-		reply += fmt.Sprintf("\n\nCouldn't resolve assignee %q — created unassigned.", assigneeHandle)
+	h.logger.Info("to-ticket: create ticket done", append(logAttrs, "created", len(result.Created), "failed", len(result.Failed), "clarification", len(result.Clarification))...)
+	h.reply(message, renderCreateTicketResult(result, assigneeHandle))
+}
+
+// renderCreateTicketResult renders one grouped chat reply for a Ticket
+// Request's outcome: created Issues first, then failures. Rendering the
+// clarification question itself (marker, truncation, 3-question cap) is
+// ticket 06's job — this only notes that questions remain.
+func renderCreateTicketResult(result usecase.CreateTicketResult, assigneeHandle string) string {
+	var lines []string
+	for _, created := range result.Created {
+		line := fmt.Sprintf("Created %s: %s — %s", created.Ticket.Key, created.Title, created.Ticket.URL)
+		if created.AssigneeUnresolved {
+			line += fmt.Sprintf("\n\nCouldn't resolve assignee %q — created unassigned.", assigneeHandle)
+		}
+		lines = append(lines, line)
 	}
-	h.logger.Info("to-ticket: created issue", append(logAttrs, "stage", "success", "issue_key", result.Ticket.Key)...)
-	h.reply(message, reply)
+	for _, failed := range result.Failed {
+		lines = append(lines, fmt.Sprintf("Couldn't create the Jira issue for %q: %s", failed.Draft.Title, failed.Err))
+	}
+	if len(result.Clarification) > 0 {
+		lines = append(lines, fmt.Sprintf("%d item(s) still need clarification from you.", len(result.Clarification)))
+	}
+	if len(lines) == 0 {
+		return "Nothing to create from that message — no ticket candidates were drafted."
+	}
+	return strings.Join(lines, "\n\n")
 }
 
 func (h *Handler) reply(to *tgbotapi.Message, text string) {

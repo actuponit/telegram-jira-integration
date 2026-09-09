@@ -30,11 +30,27 @@ type CreateTicketRequest struct {
 	VideoURL string
 }
 
-// CreateTicketResult is what the inbound adapter renders back to Telegram.
-type CreateTicketResult struct {
+// CreatedTicket is one Issue created from a Ready Candidate.
+type CreatedTicket struct {
 	Ticket             domain.Ticket
 	Title              string
 	AssigneeUnresolved bool
+}
+
+// FailedCandidate is a Ready Candidate whose Issue creation failed. Err is
+// always wrapped with ErrCreateIssueFailed.
+type FailedCandidate struct {
+	Draft domain.Draft
+	Err   error
+}
+
+// CreateTicketResult is what the inbound adapter renders back to Telegram:
+// every Issue created, every Candidate whose creation failed, and — at
+// most once — the Candidates still needing the reporter's clarification.
+type CreateTicketResult struct {
+	Created       []CreatedTicket
+	Failed        []FailedCandidate
+	Clarification []domain.Candidate
 }
 
 // ErrDraftFailed and ErrCreateIssueFailed let callers distinguish which
@@ -48,29 +64,22 @@ var (
 
 // CreateTicketFromMessage is the Ticket Request flow: draft a ticket from
 // the gathered message context, resolve the optional assignee, and create
-// the Issue.
+// one Issue per Ready Candidate. A Candidate that fails to create is
+// recorded in the result rather than aborting the rest — there is no
+// rollback. NeedsClarification Candidates never reach IssueTracker; they
+// are carried back as-is for the caller to turn into a clarification
+// request.
 func CreateTicketFromMessage(ctx context.Context, drafter ports.TicketDrafter, tracker ports.IssueTracker, resolver ports.AssigneeResolver, req CreateTicketRequest) (CreateTicketResult, error) {
 	if len(req.ContextMessages) == 0 {
 		return CreateTicketResult{}, errors.New("create ticket: no source message in context")
 	}
 
-	// TODO(ticket 03): still assumes a single Candidate — DraftSet fan-out
-	// (multiple Ready Candidates, NeedsClarification, per-Candidate Issue
-	// creation) is not yet implemented.
 	draftSet, err := drafter.Draft(ctx, req.ContextMessages)
 	if err != nil {
 		return CreateTicketResult{}, fmt.Errorf("%w: %w", ErrDraftFailed, err)
 	}
-	if len(draftSet.Candidates) != 1 || draftSet.Candidates[0].Status != domain.CandidateReady {
-		return CreateTicketResult{}, fmt.Errorf("%w: unsupported candidate set", ErrDraftFailed)
-	}
-	draft := draftSet.Candidates[0].Draft
 
 	source := req.ContextMessages[len(req.ContextMessages)-1]
-	draft.Description = fmt.Sprintf("%s\n\nReported via Telegram by %s.", draft.Description, source.SenderName)
-	if req.VideoURL != "" {
-		draft.Description = fmt.Sprintf("%s\n\nVideo: %s", draft.Description, req.VideoURL)
-	}
 
 	var assignee domain.Assignee
 	unresolved := false
@@ -83,10 +92,26 @@ func CreateTicketFromMessage(ctx context.Context, drafter ports.TicketDrafter, t
 		}
 	}
 
-	ticket, err := tracker.CreateIssue(ctx, draft, assignee, req.ImageAttachment)
-	if err != nil {
-		return CreateTicketResult{}, fmt.Errorf("%w: %w", ErrCreateIssueFailed, err)
+	var result CreateTicketResult
+	for _, candidate := range draftSet.Candidates {
+		if candidate.Status != domain.CandidateReady {
+			result.Clarification = append(result.Clarification, candidate)
+			continue
+		}
+
+		draft := candidate.Draft
+		draft.Description = fmt.Sprintf("%s\n\nReported via Telegram by %s.", draft.Description, source.SenderName)
+		if req.VideoURL != "" {
+			draft.Description = fmt.Sprintf("%s\n\nVideo: %s", draft.Description, req.VideoURL)
+		}
+
+		ticket, err := tracker.CreateIssue(ctx, draft, assignee, req.ImageAttachment)
+		if err != nil {
+			result.Failed = append(result.Failed, FailedCandidate{Draft: draft, Err: fmt.Errorf("%w: %w", ErrCreateIssueFailed, err)})
+			continue
+		}
+		result.Created = append(result.Created, CreatedTicket{Ticket: ticket, Title: draft.Title, AssigneeUnresolved: unresolved})
 	}
 
-	return CreateTicketResult{Ticket: ticket, Title: draft.Title, AssigneeUnresolved: unresolved}, nil
+	return result, nil
 }
