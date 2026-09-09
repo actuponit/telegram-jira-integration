@@ -1,0 +1,14 @@
+{
+  "split_reasoning": "One problem described, one Candidate by default.",
+  "candidates": [
+    {
+      "status": "Ready",
+      "app": "Backend",
+      "title": "Same stale balance shown in both apps",
+      "description": "Both Mela App and Merchant App show the same outdated balance after a transfer. No UI surface implicated.",
+      "issue_type": "Bug",
+      "priority": "High",
+      "open_questions": []
+    }
+  ]
+}

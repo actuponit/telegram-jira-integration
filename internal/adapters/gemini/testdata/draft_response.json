@@ -1,4 +1,5 @@
 {
+  "app": "Mela App",
   "title": "Checkout button unresponsive on iOS Safari",
   "description": "Users report tapping the checkout button on iOS Safari does nothing. No error shown, cart is unaffected.",
   "issue_type": "Bug",

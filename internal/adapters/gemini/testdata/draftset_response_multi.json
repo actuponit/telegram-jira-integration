@@ -1,0 +1,23 @@
+{
+  "split_reasoning": "Two unrelated problems: an Onfido verification freeze and a Plaid connection failure. Different feature areas, so two Candidates.",
+  "candidates": [
+    {
+      "status": "Ready",
+      "app": "Mela App",
+      "title": "Onfido identity verification screen freezes",
+      "description": "Users report the Onfido verification screen freezes and does not proceed. No error shown.",
+      "issue_type": "Bug",
+      "priority": "High",
+      "open_questions": []
+    },
+    {
+      "status": "NeedsClarification",
+      "app": "Mela App",
+      "title": "Plaid connection issue",
+      "description": "Reporter mentioned Plaid didn't connect, but it's unclear what they expected to happen instead.",
+      "issue_type": "Bug",
+      "priority": "Medium",
+      "open_questions": ["What happened when you tried to connect — an error message, or nothing at all?"]
+    }
+  ]
+}

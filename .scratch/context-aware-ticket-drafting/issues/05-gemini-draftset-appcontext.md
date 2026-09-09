@@ -7,7 +7,7 @@ implements the new clarification method from ticket 01.
 
 **Blocked by:** 01 — Domain & ports, 02 — App Context content file
 
-**Status:** open
+**Status:** done
 
 ## Scope
 

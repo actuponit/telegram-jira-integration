@@ -5,7 +5,7 @@ plus the reporter's reply and turns it into exactly one Issue.
 
 **Blocked by:** 01 — Domain & ports
 
-**Status:** open
+**Status:** done
 
 ## Scope
 
