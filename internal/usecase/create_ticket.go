@@ -54,10 +54,17 @@ func CreateTicketFromMessage(ctx context.Context, drafter ports.TicketDrafter, t
 		return CreateTicketResult{}, errors.New("create ticket: no source message in context")
 	}
 
-	draft, err := drafter.Draft(ctx, req.ContextMessages)
+	// TODO(ticket 03): still assumes a single Candidate — DraftSet fan-out
+	// (multiple Ready Candidates, NeedsClarification, per-Candidate Issue
+	// creation) is not yet implemented.
+	draftSet, err := drafter.Draft(ctx, req.ContextMessages)
 	if err != nil {
 		return CreateTicketResult{}, fmt.Errorf("%w: %w", ErrDraftFailed, err)
 	}
+	if len(draftSet.Candidates) != 1 || draftSet.Candidates[0].Status != domain.CandidateReady {
+		return CreateTicketResult{}, fmt.Errorf("%w: unsupported candidate set", ErrDraftFailed)
+	}
+	draft := draftSet.Candidates[0].Draft
 
 	source := req.ContextMessages[len(req.ContextMessages)-1]
 	draft.Description = fmt.Sprintf("%s\n\nReported via Telegram by %s.", draft.Description, source.SenderName)

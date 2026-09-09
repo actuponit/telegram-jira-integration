@@ -6,7 +6,7 @@ right `App` label.
 
 **Blocked by:** none
 
-**Status:** open
+**Status:** done
 
 ## Scope
 
@@ -43,3 +43,11 @@ in the spec. Whoever picks up ticket 05 should confirm the format matches
 what `SystemInstruction` construction wants.
 
 ## Notes
+
+File placed at `internal/adapters/gemini/appcontext.md` (586 words).
+Feature list and vendor list seeded from `mela_fi_ui`'s
+`lib/presentation/features/` directory names and `pubspec.yaml`
+dependencies (this session's working directories included that repo).
+Feature one-liners are inferred from folder names, not read line-by-line
+from a maintained index — flagging for human review in case any
+description drifts from what the feature actually does today.

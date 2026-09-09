@@ -59,7 +59,11 @@ func New(ctx context.Context, apiKey string) (*Drafter, error) {
 
 // Draft renders messages into prompt content and asks Gemini for a
 // structured ticket draft.
-func (d *Drafter) Draft(ctx context.Context, messages []ports.Message) (domain.Draft, error) {
+//
+// TODO(ticket 05): request/response shape still targets a single Draft,
+// not the split-aware DraftSet schema — wrapped here only so the
+// TicketDrafter interface compiles.
+func (d *Drafter) Draft(ctx context.Context, messages []ports.Message) (domain.DraftSet, error) {
 	contents := make([]*genai.Content, 0, len(messages))
 	for _, m := range messages {
 		text := fmt.Sprintf("[%s @ %d] %s", m.SenderName, m.Timestamp, m.Text)
@@ -74,10 +78,25 @@ func (d *Drafter) Draft(ctx context.Context, messages []ports.Message) (domain.D
 
 	resp, err := d.client.Models.GenerateContent(ctx, model, contents, config)
 	if err != nil {
-		return domain.Draft{}, fmt.Errorf("gemini: generate content: %w", err)
+		return domain.DraftSet{}, fmt.Errorf("gemini: generate content: %w", err)
 	}
 
-	return parseDraft([]byte(resp.Text()))
+	draft, err := parseDraft([]byte(resp.Text()))
+	if err != nil {
+		return domain.DraftSet{}, err
+	}
+
+	return domain.DraftSet{
+		Candidates: []domain.Candidate{{Draft: draft, Status: domain.CandidateReady}},
+	}, nil
+}
+
+// DraftFromAnswer redrafts a single Draft from the bot's prior summary and
+// the reporter's answer.
+//
+// TODO(ticket 05): not yet wired to a Gemini call.
+func (d *Drafter) DraftFromAnswer(ctx context.Context, summary, answer string) (domain.Draft, error) {
+	return domain.Draft{}, fmt.Errorf("gemini: DraftFromAnswer not implemented")
 }
 
 // draftResponse is the shape Gemini returns per responseSchema.

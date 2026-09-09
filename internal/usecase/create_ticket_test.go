@@ -16,7 +16,14 @@ type fakeDrafter struct {
 	err   error
 }
 
-func (f fakeDrafter) Draft(ctx context.Context, messages []ports.Message) (domain.Draft, error) {
+func (f fakeDrafter) Draft(ctx context.Context, messages []ports.Message) (domain.DraftSet, error) {
+	if f.err != nil {
+		return domain.DraftSet{}, f.err
+	}
+	return domain.DraftSet{Candidates: []domain.Candidate{{Draft: f.draft, Status: domain.CandidateReady}}}, nil
+}
+
+func (f fakeDrafter) DraftFromAnswer(ctx context.Context, summary, answer string) (domain.Draft, error) {
 	return f.draft, f.err
 }
 

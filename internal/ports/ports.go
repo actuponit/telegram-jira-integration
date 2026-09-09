@@ -16,10 +16,18 @@ type Message struct {
 	Timestamp  int64
 }
 
-// TicketDrafter produces a Draft from a source message and its reply-chain
-// context. Implemented by the gemini adapter.
+// TicketDrafter produces a DraftSet from a source message and its
+// reply-chain context, and redrafts a single Candidate once the reporter
+// has answered a clarification question. Implemented by the gemini
+// adapter.
 type TicketDrafter interface {
-	Draft(ctx context.Context, messages []Message) (domain.Draft, error)
+	Draft(ctx context.Context, messages []Message) (domain.DraftSet, error)
+
+	// DraftFromAnswer redrafts a single Draft from the bot's own prior
+	// summary of an unresolved Candidate and the reporter's reply to it.
+	// Unlike Draft, its input is a summary and an answer, not a message
+	// thread.
+	DraftFromAnswer(ctx context.Context, summary, answer string) (domain.Draft, error)
 }
 
 // Attachment is an image downloaded from the source message, to be

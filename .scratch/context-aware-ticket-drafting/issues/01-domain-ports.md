@@ -6,7 +6,7 @@ and `DraftSet`; `internal/ports.TicketDrafter` changes shape.
 
 **Blocked by:** none
 
-**Status:** open
+**Status:** done
 
 ## Scope
 

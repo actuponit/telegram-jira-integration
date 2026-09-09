@@ -85,13 +85,24 @@ type blockingDrafter struct {
 	release <-chan struct{}
 }
 
-func (d blockingDrafter) Draft(ctx context.Context, _ []ports.Message) (domain.Draft, error) {
+func (d blockingDrafter) Draft(ctx context.Context, _ []ports.Message) (domain.DraftSet, error) {
 	d.started <- ctx
 	<-d.release
-	return domain.Draft{Title: "Export crashes"}, nil
+	return domain.DraftSet{Candidates: []domain.Candidate{{Draft: domain.Draft{Title: "Export crashes"}, Status: domain.CandidateReady}}}, nil
 }
 
-func (f fakeDrafter) Draft(ctx context.Context, messages []ports.Message) (domain.Draft, error) {
+func (d blockingDrafter) DraftFromAnswer(ctx context.Context, summary, answer string) (domain.Draft, error) {
+	return domain.Draft{}, nil
+}
+
+func (f fakeDrafter) Draft(ctx context.Context, messages []ports.Message) (domain.DraftSet, error) {
+	if f.err != nil {
+		return domain.DraftSet{}, f.err
+	}
+	return domain.DraftSet{Candidates: []domain.Candidate{{Draft: f.draft, Status: domain.CandidateReady}}}, nil
+}
+
+func (f fakeDrafter) DraftFromAnswer(ctx context.Context, summary, answer string) (domain.Draft, error) {
 	return f.draft, f.err
 }
 
