@@ -42,6 +42,25 @@ const (
 	// statusLookupTimeout bounds a /status lookup, which is a single Jira
 	// read rather than the full drafting flow.
 	statusLookupTimeout = 30 * time.Second
+
+	// clarificationMarker opens the clarification section of a grouped
+	// reply. Its presence in a replied-to message (combined with that
+	// message coming from the bot) is what routes a plain-text reply to
+	// the clarification-answer flow instead of being ignored.
+	clarificationMarker = "Need a bit more to file this:"
+
+	// clarificationQuestionCap is the total number of questions rendered
+	// across every unresolved Candidate in one clarification section, per
+	// the spec's "at most three questions, all in one message".
+	clarificationQuestionCap = 3
+
+	// clarificationExpiry is how long after the question was asked an
+	// answer is still accepted, evaluated from the replied-to message's
+	// own timestamp — there is no record to sweep.
+	clarificationExpiry = 24 * time.Hour
+
+	// telegramMessageCap is Telegram's hard limit on message length.
+	telegramMessageCap = 4096
 )
 
 // botClient is the subset of *tgbotapi.BotAPI this adapter uses: sending a
@@ -196,7 +215,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 
 	command := commandName(message.Text)
-	if command != commandToTicket && command != commandStatus {
+
+	// A plain-text reply (no command) routes to the clarification-answer
+	// flow only when it replies to a bot message carrying the
+	// clarification marker. Every other non-command message — including a
+	// reply to a "Created <KEY>: ..." confirmation — is ignored here
+	// without a Gemini call; /status is still the only way to look one up.
+	isClarificationAnswer := command == "" && message.ReplyToMessage != nil && h.isClarificationReply(message.ReplyToMessage)
+
+	if command != commandToTicket && command != commandStatus && !isClarificationAnswer {
 		return
 	}
 
@@ -214,12 +241,65 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Acknowledge before making any outbound calls. The work must not inherit
 	// r.Context(): it is canceled when this webhook request ends.
-	switch command {
-	case commandToTicket:
+	switch {
+	case command == commandToTicket:
 		h.dispatch(func() { h.processTicket(message) })
-	case commandStatus:
+	case command == commandStatus:
 		h.dispatch(func() { h.processStatus(message) })
+	case isClarificationAnswer:
+		h.dispatch(func() { h.processClarificationAnswer(message) })
 	}
+}
+
+// isClarificationReply reports whether source is a bot message carrying the
+// clarification marker. The sender check mirrors confirmationKey: only a
+// message's own sender can edit it in Telegram, and the handler additionally
+// requires the replied-to message came from the bot itself.
+func (h *Handler) isClarificationReply(source *tgbotapi.Message) bool {
+	if source == nil || source.From == nil || source.From.ID != h.botID {
+		return false
+	}
+	return strings.Contains(messageText(source), clarificationMarker)
+}
+
+// clarificationExpired reports whether asked, the replied-to message's own
+// timestamp, is more than clarificationExpiry in the past. There is no
+// stored question to sweep — expiry is evaluated fresh from that timestamp
+// each time an answer arrives.
+func clarificationExpired(asked *tgbotapi.Message) bool {
+	askedAt := time.Unix(int64(asked.Date), 0)
+	return time.Since(askedAt) > clarificationExpiry
+}
+
+// processClarificationAnswer handles a plain-text reply to a marked
+// clarification message: it redrafts and creates exactly one Issue from the
+// bot's own prior summary (the replied-to message's text) plus the
+// reporter's answer. A late answer — the replied-to question older than
+// clarificationExpiry — is ignored silently: no ticket, no error message.
+func (h *Handler) processClarificationAnswer(message *tgbotapi.Message) {
+	ctx, cancel := context.WithTimeout(context.Background(), ticketProcessingTimeout)
+	defer cancel()
+
+	logAttrs := []any{"telegram_message_id", message.MessageID, "chat_id", message.Chat.ID}
+
+	source := message.ReplyToMessage
+	if clarificationExpired(source) {
+		h.logger.Info("clarification: question expired, answer ignored", append(logAttrs, "stage", "expiry")...)
+		return
+	}
+
+	h.logger.Info("clarification: answer received", append(logAttrs, "stage", "start")...)
+
+	created, err := usecase.CreateTicketFromAnswer(ctx, h.drafter, h.tracker, messageText(source), messageText(message))
+	if err != nil {
+		stage, reply := classifyCreateTicketError(err)
+		h.logger.Error("clarification: create ticket failed", append(logAttrs, "stage", stage, "error", err.Error())...)
+		h.reply(message, reply)
+		return
+	}
+
+	h.logger.Info("clarification: created ticket", append(logAttrs, "stage", "success", "issue_key", created.Ticket.Key)...)
+	h.reply(message, fmt.Sprintf("Created %s: %s — %s", created.Ticket.Key, created.Title, created.Ticket.URL))
 }
 
 // processStatus answers a /status command sent as a reply to one of the
@@ -326,9 +406,11 @@ func (h *Handler) processTicket(message *tgbotapi.Message) {
 }
 
 // renderCreateTicketResult renders one grouped chat reply for a Ticket
-// Request's outcome: created Issues first, then failures. Rendering the
-// clarification question itself (marker, truncation, 3-question cap) is
-// ticket 06's job — this only notes that questions remain.
+// Request's outcome: created Issues with links, then failures, then the
+// clarification question — in that order, never as separate messages. This
+// same text is what the reporter later replies to, so the clarification
+// section (when present) is what carries the marker isClarificationReply
+// looks for.
 func renderCreateTicketResult(result usecase.CreateTicketResult, assigneeHandle string) string {
 	var lines []string
 	for _, created := range result.Created {
@@ -342,12 +424,62 @@ func renderCreateTicketResult(result usecase.CreateTicketResult, assigneeHandle 
 		lines = append(lines, fmt.Sprintf("Couldn't create the Jira issue for %q: %s", failed.Draft.Title, failed.Err))
 	}
 	if len(result.Clarification) > 0 {
-		lines = append(lines, fmt.Sprintf("%d item(s) still need clarification from you.", len(result.Clarification)))
+		lines = append(lines, renderClarificationSection(result.Clarification))
 	}
 	if len(lines) == 0 {
 		return "Nothing to create from that message — no ticket candidates were drafted."
 	}
 	return strings.Join(lines, "\n\n")
+}
+
+// renderClarificationSection renders the clarification marker, a one-line
+// restatement of each unresolved Candidate, and up to clarificationQuestionCap
+// questions total across all of them. No Candidate is ever dropped; when the
+// result would overflow Telegram's message cap, per-Candidate restatements
+// and questions are progressively shortened instead.
+func renderClarificationSection(candidates []domain.Candidate) string {
+	text := strings.Join(clarificationLines(candidates, -1), "\n")
+	if len(text) <= telegramMessageCap {
+		return text
+	}
+	for max := 200; max >= 10; max -= 10 {
+		text = strings.Join(clarificationLines(candidates, max), "\n")
+		if len(text) <= telegramMessageCap {
+			return text
+		}
+	}
+	return text
+}
+
+// clarificationLines builds the clarification section line by line. When
+// max is positive, each Candidate's restatement and questions are
+// truncated to at most max characters; max < 0 means no truncation.
+func clarificationLines(candidates []domain.Candidate, max int) []string {
+	lines := []string{clarificationMarker}
+	remaining := clarificationQuestionCap
+	for i, c := range candidates {
+		lines = append(lines, fmt.Sprintf("%d. %s", i+1, truncateTo(c.Draft.Title, max)))
+		for _, q := range c.OpenQuestions {
+			if remaining <= 0 {
+				break
+			}
+			lines = append(lines, "- "+truncateTo(q, max))
+			remaining--
+		}
+	}
+	return lines
+}
+
+// truncateTo shortens s to at most max characters with a trailing ellipsis
+// when it doesn't already fit. max < 0 leaves s untouched.
+func truncateTo(s string, max int) string {
+	if max < 0 || len(s) <= max {
+		return s
+	}
+	if max <= 1 {
+		return "…"
+	}
+	return s[:max-1] + "…"
 }
 
 func (h *Handler) reply(to *tgbotapi.Message, text string) {

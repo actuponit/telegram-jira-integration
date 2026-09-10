@@ -741,3 +741,174 @@ func TestRegisterCommandsReturnsTelegramError(t *testing.T) {
 		t.Fatal("RegisterCommands() = nil, want an error when Telegram rejects the call")
 	}
 }
+
+// --- clarification flow ---
+
+func clarificationQuestion(text string, date int) *tgbotapi.Message {
+	return &tgbotapi.Message{
+		From: &tgbotapi.User{ID: botID},
+		Text: text,
+		Date: date,
+	}
+}
+
+func TestServeHTTP_ReplyToMarkedClarificationRoutesToClarificationFlow(t *testing.T) {
+	send := &fakeSender{}
+	tracker := fakeTracker{ticket: domain.Ticket{Key: "MA-9", URL: "https://jira.example/browse/MA-9"}}
+	drafter := fakeDrafter{draft: domain.Draft{Title: "Export crashes on Safari"}}
+	h := newHandler(send, &fakeFiles{}, "secret", domain.NewChatAllowlist(allowedChatID), drafter, tracker, fakeResolver{}, testLogger())
+	h.botID = botID
+	h.dispatch = func(f func()) { f() }
+
+	question := clarificationQuestion(clarificationMarker+"\n1. Export crashes\n- Which browser?", int(time.Now().Unix()))
+	update := tgbotapi.Update{Message: &tgbotapi.Message{
+		MessageID:      3,
+		Chat:           &tgbotapi.Chat{ID: allowedChatID},
+		Text:           "Safari",
+		ReplyToMessage: question,
+	}}
+	rec := serveUpdate(t, h, update)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if len(send.sent) != 1 {
+		t.Fatalf("sent = %+v, want a single reply", send.sent)
+	}
+	want := "Created MA-9: Export crashes on Safari — https://jira.example/browse/MA-9"
+	if send.sent[0].Text != want {
+		t.Fatalf("reply = %q, want %q", send.sent[0].Text, want)
+	}
+}
+
+func TestServeHTTP_ReplyToExpiredClarificationIgnoredSilently(t *testing.T) {
+	send := &fakeSender{}
+	h := newHandler(send, &fakeFiles{}, "secret", domain.NewChatAllowlist(allowedChatID), fakeDrafter{}, fakeTracker{}, fakeResolver{}, testLogger())
+	h.botID = botID
+	dispatched := false
+	h.dispatch = func(f func()) { dispatched = true; f() }
+
+	expiredDate := int(time.Now().Add(-25 * time.Hour).Unix())
+	question := clarificationQuestion(clarificationMarker+"\n1. Export crashes\n- Which browser?", expiredDate)
+	update := tgbotapi.Update{Message: &tgbotapi.Message{
+		MessageID:      4,
+		Chat:           &tgbotapi.Chat{ID: allowedChatID},
+		Text:           "Safari",
+		ReplyToMessage: question,
+	}}
+	rec := serveUpdate(t, h, update)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if !dispatched {
+		t.Fatal("expected the clarification answer to still be routed and dispatched")
+	}
+	if len(send.sent) != 0 {
+		t.Fatalf("sent = %+v, want no reply for a late answer", send.sent)
+	}
+}
+
+func TestServeHTTP_ReplyToClarificationNotFromBotIgnored(t *testing.T) {
+	send := &fakeSender{}
+	h := newHandler(send, &fakeFiles{}, "secret", domain.NewChatAllowlist(allowedChatID), fakeDrafter{}, fakeTracker{}, fakeResolver{}, testLogger())
+	h.botID = botID
+	dispatched := false
+	h.dispatch = func(func()) { dispatched = true }
+
+	impersonator := clarificationQuestion(clarificationMarker+"\n1. Export crashes\n- Which browser?", int(time.Now().Unix()))
+	impersonator.From = &tgbotapi.User{ID: botID + 1}
+	update := tgbotapi.Update{Message: &tgbotapi.Message{
+		MessageID:      6,
+		Chat:           &tgbotapi.Chat{ID: allowedChatID},
+		Text:           "Safari",
+		ReplyToMessage: impersonator,
+	}}
+	rec := serveUpdate(t, h, update)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if dispatched {
+		t.Fatal("a reply to a message not from the bot should not be dispatched")
+	}
+	if len(send.sent) != 0 {
+		t.Fatalf("sent = %+v, want no reply", send.sent)
+	}
+}
+
+func TestServeHTTP_PlainReplyToBotConfirmationStillIgnored(t *testing.T) {
+	send := &fakeSender{}
+	h := newHandler(send, &fakeFiles{}, "secret", domain.NewChatAllowlist(allowedChatID), fakeDrafter{}, fakeTracker{}, fakeResolver{}, testLogger())
+	h.botID = botID
+	dispatched := false
+	h.dispatch = func(func()) { dispatched = true }
+
+	update := tgbotapi.Update{Message: &tgbotapi.Message{
+		MessageID:      7,
+		Chat:           &tgbotapi.Chat{ID: allowedChatID},
+		Text:           "thanks",
+		ReplyToMessage: botConfirmation("Created MA-1: Export crashes — https://jira.example/browse/MA-1"),
+	}}
+	rec := serveUpdate(t, h, update)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if dispatched {
+		t.Fatal("a plain reply to a confirmation message (no clarification marker) should not be dispatched")
+	}
+	if len(send.sent) != 0 {
+		t.Fatalf("sent = %+v, want no reply", send.sent)
+	}
+}
+
+func TestRenderCreateTicketResult_GroupsCreatedFailuresThenQuestion(t *testing.T) {
+	result := usecase.CreateTicketResult{
+		Created: []usecase.CreatedTicket{
+			{Ticket: domain.Ticket{Key: "MA-1", URL: "https://jira.example/browse/MA-1"}, Title: "Export crashes"},
+		},
+		Failed: []usecase.FailedCandidate{
+			{Draft: domain.Draft{Title: "Login broken"}, Err: errors.New("jira down")},
+		},
+		Clarification: []domain.Candidate{
+			{Draft: domain.Draft{Title: "Slow load"}, OpenQuestions: []string{"Which page?"}},
+		},
+	}
+
+	got := renderCreateTicketResult(result, "")
+
+	createdIdx := strings.Index(got, "MA-1")
+	failedIdx := strings.Index(got, "Login broken")
+	questionIdx := strings.Index(got, clarificationMarker)
+	if createdIdx < 0 || failedIdx < 0 || questionIdx < 0 {
+		t.Fatalf("reply = %q, missing one of created/failed/question sections", got)
+	}
+	if !(createdIdx < failedIdx && failedIdx < questionIdx) {
+		t.Fatalf("reply = %q, want created before failed before question", got)
+	}
+}
+
+func TestRenderClarificationSection_FiveCandidatesStayWithinCapWithoutDropping(t *testing.T) {
+	var candidates []domain.Candidate
+	for i := 0; i < 5; i++ {
+		candidates = append(candidates, domain.Candidate{
+			Draft: domain.Draft{Title: strings.Repeat(fmt.Sprintf("verbose candidate %d ", i), 20)},
+			OpenQuestions: []string{
+				strings.Repeat("a very long open question that goes on and on ", 10),
+			},
+		})
+	}
+
+	got := renderClarificationSection(candidates)
+
+	if len(got) > telegramMessageCap {
+		t.Fatalf("len(section) = %d, want <= %d", len(got), telegramMessageCap)
+	}
+	for i := 1; i <= 5; i++ {
+		marker := fmt.Sprintf("%d. ", i)
+		if !strings.Contains(got, marker) {
+			t.Fatalf("section missing candidate %d, want no candidate dropped: %q", i, got)
+		}
+	}
+}

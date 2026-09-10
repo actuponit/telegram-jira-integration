@@ -8,7 +8,7 @@ messages per outcome.
 **Blocked by:** 03 — Use case: multi-candidate ticket creation,
 04 — Use case: clarification answer
 
-**Status:** open
+**Status:** done
 
 ## Scope
 
