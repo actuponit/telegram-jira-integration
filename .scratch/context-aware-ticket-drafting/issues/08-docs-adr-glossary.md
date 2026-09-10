@@ -6,7 +6,7 @@ stateless clarification carrier, and `CONTEXT.md` glossary additions.
 
 **Blocked by:** 01 — Domain & ports
 
-**Status:** open
+**Status:** done
 
 ## Scope
 
@@ -31,3 +31,15 @@ stateless clarification carrier, and `CONTEXT.md` glossary additions.
 - `CONTEXT.md` glossary has all four new terms and an updated `Draft` entry.
 
 ## Notes
+
+- ADR-0001 amended in place with a dated amendment section (not an edit that
+  erases the original decision).
+- New ADR-0003 (`docs/adr/0003-stateless-clarification-carrier.md`) — next
+  free ADR number after 0001/0002.
+- CONTEXT.md glossary: added Candidate, DraftSet, App, App Context,
+  Clarification; updated Draft entry (now yields a DraftSet, added `app`
+  field, cross-referenced Candidate).
+- Verified against current code (`internal/domain/ticket.go`,
+  `internal/adapters/telegram/telegram.go`,
+  `internal/adapters/gemini/appcontext.md`) — all terms match what's
+  actually implemented, not just what the spec proposed.

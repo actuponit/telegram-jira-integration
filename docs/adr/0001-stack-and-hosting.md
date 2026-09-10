@@ -69,3 +69,20 @@ JS-only, under-documented platform was rejected.
 - Revisit Telegram Serverless once/if it adds non-JS runtimes or documents
   its secrets and limits story — nothing here is permanent, it's what fits
   today's constraints.
+
+## Amendment (2026-09-10): clarification questions don't reopen fire-and-forget
+
+The "Decision" section above states there is no confirm/edit step before
+creation. The context-aware multi-ticket drafting work
+(`.scratch/context-aware-ticket-drafting/spec.md`) introduced a clarification
+question for a Candidate the bot genuinely cannot draft — see ADR-0003 for the
+carrier mechanism.
+
+This narrows, not contradicts, the original clause. Fire-and-forget still
+governs everything the bot *can* draft: every `Ready` Candidate is created
+immediately, exactly as before, with no review step. A clarification question
+is not a confirmation because nothing sits pending approval — there is no
+Draft waiting on a yes/no. It is asked only when the bot cannot tell what the
+reporter wants changed at all, asked once, and the reporter's reply produces
+the Issue directly. The original decision — no "is this right?" step on
+anything the bot did manage to draft — stands unchanged.

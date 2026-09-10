@@ -8,9 +8,34 @@ Single-context repo. Read this before exploring or making changes; check
 - **Ticket Request** — a Telegram `/to_ticket [@assignee]` command, always sent
   as a reply to another message. The replied-to message is the **source
   message**.
-- **Draft** — the structured `{title, description, issue_type, priority,
-  labels}` object Gemini returns for a source message. A Draft is not yet a
-  Jira issue.
+- **Draft** — the structured `{title, description, app, issue_type,
+  priority, labels}` object for one problem drafted out of a Ticket
+  Request. A Draft is not yet a Jira issue. A Ticket Request no longer
+  yields a single Draft — it yields a **DraftSet** (see below).
+- **Candidate** — a Draft plus whether it's ready to file: `Ready`, or
+  `NeedsClarification` with its `OpenQuestions`. Sits between Draft and
+  Issue — a proposed Issue not yet created. A `Ready` Candidate is created
+  immediately, fire-and-forget; a `NeedsClarification` one triggers a
+  **Clarification** instead.
+- **DraftSet** — everything one Gemini drafting call returns for a Ticket
+  Request: its `SplitReasoning` (why the message was split the way it was)
+  plus the resulting Candidates. One Ticket Request produces one DraftSet
+  and, from it, zero or more Issues.
+- **App** — the Mela product a Draft's problem was observed in: `Mela App`,
+  `Merchant App`, or `Backend`. Single-valued, mutually exclusive, written
+  to the Issue as a label. Records where the problem was *observed*, not a
+  diagnosis of where the fix belongs — see ADR-0001 for the labelling rule.
+- **App Context** — the static, repo-local description of the Mela app
+  (what it is, its features, the third-party services it touches) supplied
+  to Gemini so it can recognise product shorthand like "Onfido" or "Plaid".
+  Covers what exists, never how it works, so it can't tip the model from
+  classifying into diagnosing. See `internal/adapters/gemini/appcontext.md`
+  and ADR-0001.
+- **Clarification** — the one-question exchange for a Candidate the bot
+  genuinely cannot draft. The bot's own question message is the state (see
+  ADR-0003); the reporter's reply to it produces exactly one Issue, with no
+  further questions. This is not a confirmation step — see ADR-0001's
+  amendment.
 - **Issue** — the Jira ticket created from a Draft. Identified by its Jira
   `key` (e.g. `PROJ-482`).
 - **Assignee Mapping** — the `telegram_username -> jira_account_id` table
