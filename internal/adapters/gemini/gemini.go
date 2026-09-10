@@ -17,7 +17,10 @@ const model = "gemini-3.6-flash"
 
 const baseSystemInstruction = `You draft Jira tickets from a Telegram conversation.
 Stay strictly factual: only use details present in the conversation, never invent
-information that isn't there. If the severity of the issue is unclear, default
+information that isn't there. You may elaborate beyond a literal restatement only
+when you're confident the added detail is grounded in the conversation or the
+App Context below — never guess at a root cause, file, screen or service that
+isn't named in either. If the severity of the issue is unclear, default
 priority to Medium.`
 
 //go:embed appcontext.md
