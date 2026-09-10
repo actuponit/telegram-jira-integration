@@ -401,6 +401,12 @@ func (h *Handler) processTicket(message *tgbotapi.Message) {
 		return
 	}
 
+	for _, created := range result.Created {
+		h.logger.Info("to-ticket: candidate created", append(logAttrs, "stage", "jira", "title", created.Title, "issue_key", created.Ticket.Key)...)
+	}
+	for _, failed := range result.Failed {
+		h.logger.Error("to-ticket: candidate creation failed", append(logAttrs, "stage", "jira", "title", failed.Draft.Title, "error", failed.Err.Error())...)
+	}
 	h.logger.Info("to-ticket: create ticket done", append(logAttrs, "created", len(result.Created), "failed", len(result.Failed), "clarification", len(result.Clarification))...)
 	h.reply(message, renderCreateTicketResult(result, assigneeHandle))
 }

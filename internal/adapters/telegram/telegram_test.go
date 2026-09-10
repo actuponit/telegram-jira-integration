@@ -76,8 +76,9 @@ func (f *fakeFiles) Download(_ context.Context, url string) ([]byte, error) {
 }
 
 type fakeDrafter struct {
-	draft domain.Draft
-	err   error
+	draft    domain.Draft
+	err      error
+	draftSet *domain.DraftSet
 }
 
 type blockingDrafter struct {
@@ -99,6 +100,9 @@ func (f fakeDrafter) Draft(ctx context.Context, messages []ports.Message) (domai
 	if f.err != nil {
 		return domain.DraftSet{}, f.err
 	}
+	if f.draftSet != nil {
+		return *f.draftSet, nil
+	}
 	return domain.DraftSet{Candidates: []domain.Candidate{{Draft: f.draft, Status: domain.CandidateReady}}}, nil
 }
 
@@ -110,12 +114,22 @@ type fakeTracker struct {
 	ticket domain.Ticket
 	err    error
 
+	// errByTitle overrides err/ticket per Draft.Title, for tests exercising
+	// a partial failure across multiple Candidates in one run.
+	errByTitle map[string]error
+
 	statusTicket domain.Ticket
 	statusErr    error
 	gotStatusKey *string
 }
 
 func (f fakeTracker) CreateIssue(ctx context.Context, draft domain.Draft, assignee domain.Assignee, attachment *ports.Attachment) (domain.Ticket, error) {
+	if err, ok := f.errByTitle[draft.Title]; ok {
+		if err != nil {
+			return domain.Ticket{}, err
+		}
+		return domain.Ticket{Key: draft.Title}, nil
+	}
 	return f.ticket, f.err
 }
 
@@ -488,6 +502,62 @@ func TestServeHTTP_JiraFailureSurfacesErrorMessages(t *testing.T) {
 
 	if len(send.sent) != 1 || !bytes.Contains([]byte(send.sent[0].Text), []byte("issuetype is required")) {
 		t.Fatalf("sent = %+v, want Jira's errorMessages surfaced", send.sent)
+	}
+}
+
+func TestServeHTTP_PartialFailureLogsPerCandidateWithMessageID(t *testing.T) {
+	var logs bytes.Buffer
+	send := &fakeSender{}
+	drafter := fakeDrafter{draftSet: &domain.DraftSet{Candidates: []domain.Candidate{
+		{Draft: domain.Draft{Title: "Export crashes"}, Status: domain.CandidateReady},
+		{Draft: domain.Draft{Title: "Login is slow"}, Status: domain.CandidateReady},
+	}}}
+	tracker := fakeTracker{errByTitle: map[string]error{
+		"Export crashes": nil,
+		"Login is slow":  errors.New("jira: create issue failed (400): issuetype is required"),
+	}}
+	h := newHandler(send, &fakeFiles{}, "secret", domain.NewChatAllowlist(allowedChatID), drafter, tracker, fakeResolver{}, slog.New(slog.NewTextHandler(&logs, nil)))
+
+	update := tgbotapi.Update{Message: &tgbotapi.Message{
+		MessageID:      42,
+		Chat:           &tgbotapi.Chat{ID: allowedChatID},
+		Text:           "/to_ticket",
+		ReplyToMessage: &tgbotapi.Message{From: &tgbotapi.User{UserName: "alice"}, Text: "it broke"},
+	}}
+	h.processTicket(update.Message)
+
+	var createdLine, failedLine string
+	for _, line := range strings.Split(strings.TrimRight(logs.String(), "\n"), "\n") {
+		switch {
+		case strings.Contains(line, "candidate created"):
+			createdLine = line
+		case strings.Contains(line, "candidate creation failed"):
+			failedLine = line
+		}
+	}
+
+	if createdLine == "" {
+		t.Fatalf("logs = %q, want a \"candidate created\" record", logs.String())
+	}
+	for _, want := range []string{"telegram_message_id=42", `title="Export crashes"`} {
+		if !strings.Contains(createdLine, want) {
+			t.Fatalf("created record = %q, want it to contain %q", createdLine, want)
+		}
+	}
+	if strings.Contains(createdLine, "Login is slow") {
+		t.Fatalf("created record = %q, want only the succeeded Candidate, not the failed one", createdLine)
+	}
+
+	if failedLine == "" {
+		t.Fatalf("logs = %q, want a \"candidate creation failed\" record", logs.String())
+	}
+	for _, want := range []string{"telegram_message_id=42", `title="Login is slow"`, "issuetype is required"} {
+		if !strings.Contains(failedLine, want) {
+			t.Fatalf("failed record = %q, want it to contain %q", failedLine, want)
+		}
+	}
+	if strings.Contains(failedLine, "Export crashes") {
+		t.Fatalf("failed record = %q, want only the failed Candidate, not the succeeded one", failedLine)
 	}
 }
 

@@ -7,7 +7,7 @@ failure reporting) hold end to end.
 **Blocked by:** 05 — Gemini adapter: DraftSet schema + App Context,
 06 — Telegram adapter: clarification carrier + grouped reply
 
-**Status:** open
+**Status:** done
 
 ## Scope
 
@@ -39,3 +39,12 @@ failure reporting) hold end to end.
   path.
 
 ## Notes
+
+Wiring, use-case fan-out, assignee/attachment handling, and grouped reply
+were already in place from tickets 03/05/06. Gap found and closed: multi-
+Candidate runs only logged aggregate counts, not per-Candidate outcome, so
+a partial failure wasn't traceable to which Candidate/why from Cloud
+Logging alone. Added per-Created and per-Failed log lines (title, issue
+key or error) carrying `telegram_message_id`, with a red-then-green test
+(`TestServeHTTP_PartialFailureLogsPerCandidateWithMessageID`) covering a
+mixed created/failed multi-Candidate run.
