@@ -7,3 +7,10 @@ deploy/config.env
 
 # Build output.
 /bot
+
+# Private working files — not published.
+.DS_Store
+.scratch/
+general-plan.md
+docs/research/
+.vscode/
